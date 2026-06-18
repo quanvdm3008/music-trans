@@ -52,9 +52,22 @@ export function TabView({ notes, isPlaying, getTime, chords: externalChords, bar
       const dpr = window.devicePixelRatio || 1;
       const W = canvas.clientWidth || 1;
 
-      // Force exact bars per row if barDuration is set
-      const secondsPerRow = barDuration ? barDuration * barsPerRow : (Math.max(80, W - PAD_L - PAD_R) / pps);
-      const barDur = barDuration ?? (secondsPerRow / barsPerRow);
+      // Compute usable row width and effective bars/row.
+      const usableWidth = Math.max(80, W - PAD_L - PAD_R);
+      let effectiveBarsPerRow = barsPerRow;
+      let secondsPerRow: number;
+      let barDur: number;
+
+      if (barDuration) {
+        // Clamp bars/row so all notes fit within the canvas width.
+        const maxBars = Math.max(1, Math.floor(usableWidth / (barDuration * pps)));
+        effectiveBarsPerRow = Math.min(barsPerRow, maxBars);
+        secondsPerRow = barDuration * effectiveBarsPerRow;
+        barDur = barDuration;
+      } else {
+        secondsPerRow = usableWidth / pps;
+        barDur = secondsPerRow / barsPerRow;
+      }
 
       // Compute which rows have notes (skip empty rows)
       const lastTime = tab.columns.length ? tab.columns[tab.columns.length - 1].time : 0;
@@ -111,7 +124,7 @@ export function TabView({ notes, isPlaying, getTime, chords: externalChords, bar
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
         const barStart = Math.round(rowStartTime / barDur) + 1;
-        const barEnd = barStart + barsPerRow - 1;
+        const barEnd = barStart + effectiveBarsPerRow - 1;
         ctx.fillText(`${fmtTime(rowStartTime)}  bar ${barStart}-${barEnd}`, 6, rowTop + 14);
 
         // Chord labels — positioned at first note of each chord
