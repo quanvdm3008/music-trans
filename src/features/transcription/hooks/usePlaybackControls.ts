@@ -31,6 +31,7 @@ export function usePlaybackControls(
 
   const playbackRef = useRef<PlaybackHandle | null>(null);
   const rafRef = useRef<number | null>(null);
+  const wasPlayingRef = useRef(false);
 
   const stopPlayback = useCallback(() => {
     playbackRef.current?.stop();
@@ -43,18 +44,16 @@ export function usePlaybackControls(
 
   const getPlaybackTime = useCallback(() => playbackRef.current?.currentTime() ?? null, []);
 
-  const handlePlayToggle = useCallback(async () => {
-    if (playState !== 'idle') {
-      stopPlayback();
-      return;
-    }
+  /** Core play logic — reused by toggle, seek, and instrument-switch restart. */
+  const startPlayback = useCallback(async (fromSeconds = 0) => {
     // Choose notes: tab-filtered notes when in tab/violin mode, raw notes for sheet.
     const playNotes_ = (viewMode && viewMode !== 'sheet' && tabNotes) ? tabNotes : notes;
     if (!playNotes_ || playNotes_.length === 0) return;
     const inst: InstrumentId = viewMode ? VIEW_INSTRUMENT[viewMode] : instrument;
     setPlayState('loading');
+    setPlayError(null);
     try {
-      const handle = await playNotes(playNotes_, () => stopPlayback(), inst, speed);
+      const handle = await playNotes(playNotes_, () => stopPlayback(), inst, speed, fromSeconds);
       playbackRef.current = handle;
       setPlaySource(handle.source);
       setPlayState('playing');
@@ -72,9 +71,39 @@ export function usePlaybackControls(
       );
       stopPlayback();
     }
-  }, [playState, notes, tabNotes, viewMode, stopPlayback, instrument]);
+  }, [notes, tabNotes, viewMode, instrument, speed, stopPlayback]);
 
-  useEffect(() => stopPlayback, [stopPlayback]);
+  const handlePlayToggle = useCallback(async () => {
+    if (playState !== 'idle') {
+      wasPlayingRef.current = false;
+      stopPlayback();
+      return;
+    }
+    wasPlayingRef.current = true;
+    await startPlayback(0);
+  }, [playState, stopPlayback, startPlayback]);
+
+  /** Seek to a position (seconds). Stops current playback and restarts from offset. */
+  const seekTo = useCallback(async (seconds: number) => {
+    const wasPlaying = playState === 'playing';
+    stopPlayback();
+    if (wasPlaying) {
+      wasPlayingRef.current = true;
+      await startPlayback(Math.max(0, seconds));
+    }
+  }, [playState, stopPlayback, startPlayback]);
+
+  // When instrument/viewMode changes while playing, restart from beginning.
+  useEffect(() => {
+    if (wasPlayingRef.current && viewMode !== undefined) {
+      stopPlayback();
+      // Small delay so the previous audio context can release.
+      const t = setTimeout(() => { startPlayback(0); }, 50);
+      return () => clearTimeout(t);
+    }
+  }, [viewMode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => () => stopPlayback(), [stopPlayback]);
 
   return {
     playState,
@@ -86,5 +115,6 @@ export function usePlaybackControls(
     getPlaybackTime,
     handlePlayToggle,
     stopPlayback,
+    seekTo,
   };
 }
