@@ -61,15 +61,38 @@ export function filterTabNotes(
 ): NoteEventTime[] {
   const open = OPEN_PITCHES[tuning];
   const sorted = [...notes].sort((a, b) => a.startTimeSeconds - b.startTimeSeconds);
-  const result: NoteEventTime[] = [];
+  const isViolin = tuning === 'violin';
+
+  // Pass 1: per-string sixteenth-note filter
+  const afterStringFilter: NoteEventTime[] = [];
   const lastKeptByString = new Map<number, number>();
   for (const note of sorted) {
     const pos = position(Math.round(note.pitchMidi), open, capo);
     if (!pos) continue;
     const lastTime = lastKeptByString.get(pos.s) ?? -Infinity;
     if (note.startTimeSeconds - lastTime < SIXTEENTH_NOTE_MIN_GAP) continue;
-    result.push(note);
+    afterStringFilter.push(note);
     lastKeptByString.set(pos.s, note.startTimeSeconds);
+  }
+
+  // Pass 2: violin is monophonic — at most one note per COLUMN_EPSILON window.
+  // Pick the note with the lowest fret position (easiest to play).
+  if (!isViolin) return afterStringFilter;
+
+  const result: NoteEventTime[] = [];
+  for (const note of afterStringFilter) {
+    const last = result[result.length - 1];
+    if (last && Math.abs(note.startTimeSeconds - last.startTimeSeconds) <= COLUMN_EPSILON) {
+      // Two notes at nearly the same time — keep the one with the lower fret.
+      const prevPos = position(Math.round(last.pitchMidi), open, capo);
+      const curPos = position(Math.round(note.pitchMidi), open, capo);
+      if (curPos && (!prevPos || curPos.fret < prevPos.fret)) {
+        result[result.length - 1] = note; // replace — this note is easier
+      }
+      // else: keep the previous note, discard this one
+    } else {
+      result.push(note);
+    }
   }
   return result;
 }
