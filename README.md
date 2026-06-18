@@ -1,39 +1,98 @@
-# 🎵 → 🎼 Audio/Video → Sheet Music
+# 🎵 MelodyScribe Pro — AI Audio to Sheet Music & Chord Converter
 
-**🔗 Live app: [music-converter.thuannt.id.vn](https://music-converter.thuannt.id.vn/)**
+Turn any **audio or video** into **sheet music, guitar tab, and chord progressions** — right in your browser. Drop in a song, and the AI detects notes, chords, key, and renders beautiful notation. Your file never leaves your device.
 
-Turn any **audio or video** into **sheet music**, right in your browser.
-Drop in a song, and the app uses AI to detect the notes and engrave a score you can
-read, play back, and export — your file never leaves your device.
+## ✨ Features
 
-## What it does
+- 🎧 **Import audio/video** (MP3, WAV, FLAC, OGG, M4A, MP4, MOV, WebM)
+- 🤖 **AI note detection** via Spotify Basic Pitch
+- 🎼 **Sheet music** rendered with Verovio (MusicXML, MIDI, PDF export)
+- 🎸 **Guitar & Violin tab** with real-time chord labels, bar markers, and playback
+- 🎹 **Playback** on Piano, Guitar, or Violin (SoundFont)
+- 🔍 **Chord detection** with inversions (slash chords), alternatives, and explanations
+- 🎛️ **Fine-tune**: AI sensitivity, tempo, time signature, key, layout
 
-- 🎧 **Import audio or video** (mp3, wav, flac, ogg, m4a, mp4, mov, webm).
-- 🤖 **AI note detection** turns the recording into a music score.
-- 🎼 **View the sheet music**, and **export** as **MIDI**, **MusicXML**, or **PDF**.
-- 🎹 **Play it back** on a piano sound, with a **falling-notes view** — keys light up in time.
-- 🎚️ **Fine-tune** the result: tempo, time signature, key, two-hand split, and detection sensitivity
-  (with a one-click **auto-calibrate**).
+## 🏗️ Project Structure
 
-Works best on **solo piano or a clear melody**. Busy, multi-instrument mixes are harder — treat the
-output as a strong **draft** and polish it in [MuseScore](https://musescore.org).
+```
+music-converter/
+├── index.html                    # Entry HTML
+├── package.json                  # Dependencies & scripts
+├── vite.config.ts                # Vite bundler config
+├── tsconfig.json                 # TypeScript config
+├── wrangler.jsonc                # Cloudflare Workers config
+│
+├── public/
+│   ├── model/                    # Basic Pitch AI model
+│   └── soundfonts/               # Instrument SoundFont JS files
+│
+├── src/
+│   ├── main.tsx                  # React entry point
+│   ├── index.css                 # Design tokens + Tailwind utilities
+│   │
+│   ├── app/
+│   │   ├── router.tsx            # React Router config
+│   │   └── AppLayout.tsx         # Full-screen studio shell
+│   │
+│   ├── core/
+│   │   ├── audio/                # Web Audio: context, instruments, player
+│   │   ├── music/
+│   │   │   ├── chords.ts         # Chord recognition engine (19 templates, inversions, key detection)
+│   │   │   ├── notation.ts       # MIDI ↔ note name conversion
+│   │   │   └── note-event.ts     # NoteEventTime type
+│   │   └── stores/
+│   │       ├── playback.store.ts # Playback preferences (instrument, loop)
+│   │       ├── theme.store.ts    # Theme mode (cute/cosmic/pro)
+│   │       └── ui.store.ts       # View mode (sheet/tab/violin)
+│   │
+│   ├── features/
+│   │   ├── transcription/
+│   │   │   ├── hooks/            # useTranscription, useTranscribeSource, usePlaybackControls, useScoreExport
+│   │   │   ├── lib/              # Audio decode, Basic Pitch, quantization, MIDI/MusicXML, Verovio, note worker
+│   │   │   └── components/       # Dropzone, Controls, Fretboard, PianoRoll, SheetMusic, ResultView
+│   │   ├── tablature/
+│   │   │   ├── TabView.tsx       # Canvas-rendered guitar/violin tab
+│   │   │   ├── tab.ts            # Tab generation from notes
+│   │   │   ├── tab-view-geometry.ts # Layout math (spacing, padding, zoom)
+│   │   │   └── tablature.store.ts # Tuning, capo, zoom state
+│   │   └── projects/             # Project CRUD + local storage
+│   │
+│   ├── components/
+│   │   ├── icons/Icons.tsx       # 24 inline SVG icons
+│   │   └── studio/               # OrbUpload, ControlPanel, ResultPanel, WaveformPlayer, ThemeToggle, ParticleBackground
+│   │
+│   ├── pages/
+│   │   ├── TranscribePage.tsx    # Main studio: Hero → Dashboard → Sheet Music
+│   │   ├── DashboardPage.tsx     # Overview + quick actions
+│   │   ├── ProjectsPage.tsx      # Saved projects list
+│   │   ├── LibraryPage.tsx       # Download exports
+│   │   └── SettingsPage.tsx      # Theme + preferences
+│   │
+│   └── shared/
+│       ├── lib/                  # cn(), encode, utils
+│       └── ui/                   # GlassCard, SkyButton, PageHeader
+│
+└── worker/                       # Cloudflare Worker (API proxy)
+```
 
-## Run it
-
-Needs **Node.js 18+** (20 recommended).
+## 🚀 Run
 
 ```bash
 npm install
-npm run dev      # then open the printed http://localhost URL
+npm run dev      # → http://localhost:3000/
+npm run build    # Production build
+npm run test     # Vitest
 ```
 
-## Use it
+## 🛠️ Tech Stack
 
-1. Drag in (or pick) an audio/video file.
-2. Give it a title and click **Transcribe**.
-3. Press **Play** to preview, tweak the controls if needed, then **download** MIDI / MusicXML / PDF.
-
----
-
-Built with [Basic Pitch](https://github.com/spotify/basic-pitch) (Spotify) for note detection and
-[Verovio](https://www.verovio.org/) for engraving. Runs 100% in the browser — no server, no sign-up.
+| Layer | Technology |
+|-------|-----------|
+| Framework | React 19 + TypeScript 6 |
+| Build | Vite 8 |
+| Styling | Tailwind CSS 4 |
+| State | Zustand |
+| AI | Spotify Basic Pitch |
+| Notation | Verovio |
+| Audio | Web Audio API + SoundFont |
+| Deploy | Cloudflare Workers + Wrangler |
