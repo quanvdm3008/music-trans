@@ -676,14 +676,15 @@ export function TranscribePage() {
   const hasFile = Boolean(t.file);
   const hasResult = Boolean(t.notes && noteCount > 0);
 
-  // Compute bar-based chords and bar duration
+  // Compute bar-based chords — use a fixed 1.5s time-window so tempo
+  // changes only affect playback speed, not chord detection.
   const barDuration = (60 / (t.scoreSettings?.tempo ?? 120)) * (t.scoreSettings?.beats ?? 4);
   const barChords = useMemo(() => {
     if (!t.notes || t.notes.length === 0) return null;
-    const bpm = t.scoreSettings?.tempo ?? 120;
-    const beats = t.scoreSettings?.beats ?? 4;
-    return detectChordsFromNotes(t.notes as any, { bpm, beatsPerBar: beats });
-  }, [t.notes, t.scoreSettings?.tempo, t.scoreSettings?.beats]);
+    // Time-window mode (1500ms) — tempo-independent, groups notes that sound
+    // close together regardless of BPM setting.
+    return detectChordsFromNotes(t.notes as any, 1500);
+  }, [t.notes]);
 
   return (
     <>

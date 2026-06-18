@@ -54,15 +54,19 @@ export function generateTab(notes: NoteEventTime[], tuning: TuningId, capo = 0):
 
   const sorted = [...notes].sort((a, b) => a.startTimeSeconds - b.startTimeSeconds);
 
-  // Filter: drop notes closer than a sixteenth note to the last kept note.
-  // This prevents unplayable rapid-note clusters on guitar tab while
-  // continuing to check subsequent notes (not just the immediate neighbor).
+  // Filter: drop notes closer than a sixteenth note to the last kept note
+  // **on the same string** — different strings are independent (chords, arpeggios).
+  // This prevents unplayable rapid re-picks on a single string while
+  // continuing to check subsequent notes on that same string.
   const filtered: typeof sorted = [];
-  let lastKeptTime = -Infinity;
+  const lastKeptByString = new Map<number, number>(); // string index → last kept time
   for (const note of sorted) {
-    if (note.startTimeSeconds - lastKeptTime < SIXTEENTH_NOTE_MIN_GAP) continue;
+    const pos = position(Math.round(note.pitchMidi), open, capo);
+    if (!pos) continue; // unplayable on this instrument — drop entirely
+    const lastTime = lastKeptByString.get(pos.s) ?? -Infinity;
+    if (note.startTimeSeconds - lastTime < SIXTEENTH_NOTE_MIN_GAP) continue;
     filtered.push(note);
-    lastKeptTime = note.startTimeSeconds;
+    lastKeptByString.set(pos.s, note.startTimeSeconds);
   }
 
   const columns: TabColumn[] = [];
