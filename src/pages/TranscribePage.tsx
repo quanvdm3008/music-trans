@@ -524,59 +524,6 @@ function SheetMusicPreviewerSection({
   const pianoNotes = playbackNotes ?? notes;
   const pitchRange = getPitchRange((pianoNotes as any) ?? null);
 
-  // Auto-scroll: while playing, keep the current spot in view ("nhạc tới đâu cuộn tới đó").
-  const followRef = useRef<HTMLDivElement>(null);
-  const followNotes = isTabMode ? notes : pianoNotes;
-  const totalSeconds = useMemo(() => {
-    let max = 0;
-    for (const n of followNotes ?? []) max = Math.max(max, n.startTimeSeconds + Math.max(0.1, n.durationSeconds));
-    return max;
-  }, [followNotes]);
-  useEffect(() => {
-    if (!isPlaying || totalSeconds <= 0) return;
-    const el = followRef.current;
-    if (!el) return;
-    // Read layout once (not every frame) to avoid forced-reflow jank while
-    // the canvas visualizers are also drawing via their own rAF loops.
-    const docTop = window.scrollY + el.getBoundingClientRect().top;
-    const usable = el.offsetHeight - window.innerHeight + 160;
-    if (usable <= 0) return;
-
-    let raf = 0;
-    let lastTarget = -1;
-    // If the user manually scrolls away (e.g. to read the tab further down),
-    // back off for a few seconds instead of yanking the page back — that
-    // "kéo lên giữa trang" snap-back was us fighting the user's own scroll.
-    let pausedUntil = 0;
-    const onUserScroll = () => { pausedUntil = performance.now() + 4000; };
-    window.addEventListener('wheel', onUserScroll, { passive: true });
-    window.addEventListener('touchmove', onUserScroll, { passive: true });
-
-    const loop = () => {
-      const t = getTime();
-      if (t != null && performance.now() >= pausedUntil) {
-        const frac = Math.max(0, Math.min(1, t / totalSeconds));
-        const target = docTop + frac * usable - 80;
-        // Only touch the scroll position when it actually moved enough to
-        // matter — calling scrollTo every frame is what caused the stutter.
-        if (Math.abs(target - lastTarget) >= 1) {
-          // `behavior: 'instant'` overrides the global CSS `scroll-behavior:
-          // smooth` — without it, the browser's smooth-scroll animation keeps
-          // chasing a target that moves every frame, which looks like jitter.
-          window.scrollTo({ top: target, behavior: 'instant' as ScrollBehavior });
-          lastTarget = target;
-        }
-      }
-      raf = requestAnimationFrame(loop);
-    };
-    raf = requestAnimationFrame(loop);
-    return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener('wheel', onUserScroll);
-      window.removeEventListener('touchmove', onUserScroll);
-    };
-  }, [isPlaying, getTime, totalSeconds]);
-
   const downloadMidi = () => { if (midiBytes) downloadFile(midiBytes, `${fileName || 'output'}.mid`, 'audio/midi'); };
   const downloadXml = () => { if (musicXml) downloadFile(musicXml, `${fileName || 'output'}.musicxml`, 'application/vnd.recordare.musicxml+xml'); };
   const downloadPdf = () => window.print();
@@ -667,7 +614,7 @@ function SheetMusicPreviewerSection({
         )}
 
         {/* Canvas: Sheet Music OR Tab */}
-        <div ref={followRef} className="flex flex-col" style={{ background: 'white', minHeight: '380px' }}>
+        <div className="flex flex-col" style={{ background: 'white', minHeight: '380px' }}>
           {!hasResult ? (
             <div className="flex-1 flex items-center justify-center p-10 text-center" style={{ color: 'var(--ms-muted-light)' }}>
               <div>
