@@ -76,24 +76,37 @@ export function filterTabNotes(
   }
 
   // Pass 2: violin is monophonic — at most one note per COLUMN_EPSILON window.
+  // Use a fixed window anchor so clusters don't chain-collapse.
   // Pick the note with the lowest fret position (easiest to play).
   if (!isViolin) return afterStringFilter;
 
   const result: NoteEventTime[] = [];
+  let windowStart = -Infinity;
+  let bestInWindow: { note: NoteEventTime; fret: number } | null = null;
+
+  const flushWindow = () => {
+    if (bestInWindow) {
+      result.push(bestInWindow.note);
+      bestInWindow = null;
+    }
+  };
+
   for (const note of afterStringFilter) {
-    const last = result[result.length - 1];
-    if (last && Math.abs(note.startTimeSeconds - last.startTimeSeconds) <= COLUMN_EPSILON) {
-      // Two notes at nearly the same time — keep the one with the lower fret.
-      const prevPos = position(Math.round(last.pitchMidi), open, capo);
-      const curPos = position(Math.round(note.pitchMidi), open, capo);
-      if (curPos && (!prevPos || curPos.fret < prevPos.fret)) {
-        result[result.length - 1] = note; // replace — this note is easier
-      }
-      // else: keep the previous note, discard this one
+    if (note.startTimeSeconds - windowStart > COLUMN_EPSILON) {
+      // New time window — flush the previous one.
+      flushWindow();
+      windowStart = note.startTimeSeconds;
+      const pos = position(Math.round(note.pitchMidi), open, capo);
+      bestInWindow = pos ? { note, fret: pos.fret } : null;
     } else {
-      result.push(note);
+      // Same window — compete: keep the note with the lower fret.
+      const pos = position(Math.round(note.pitchMidi), open, capo);
+      if (pos && (!bestInWindow || pos.fret < bestInWindow.fret)) {
+        bestInWindow = { note, fret: pos.fret };
+      }
     }
   }
+  flushWindow();
   return result;
 }
 
