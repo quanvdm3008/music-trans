@@ -22,6 +22,8 @@ export function usePlaybackControls(
   viewMode?: ViewMode,
   /** Filtered tab notes — used instead of raw notes when in tab/violin mode. */
   tabNotes?: NoteEventTime[] | null,
+  /** Grid-quantized sheet notes — used instead of raw notes when in sheet mode. */
+  sheetNotes?: NoteEventTime[] | null,
 ) {
   const [playState, setPlayState] = useState<PlayState>('idle');
   const [playProgress, setPlayProgress] = useState(0);
@@ -46,8 +48,16 @@ export function usePlaybackControls(
 
   /** Core play logic — reused by toggle, seek, and instrument-switch restart. */
   const startPlayback = useCallback(async (fromSeconds = 0) => {
-    // Choose notes: tab-filtered notes when in tab/violin mode, raw notes for sheet.
-    const playNotes_ = (viewMode && viewMode !== 'sheet' && tabNotes) ? tabNotes : notes;
+    // Choose notes based on view mode:
+    //   sheet  → grid-quantized notes (match the staff)
+    //   tab    → guitar-filtered notes
+    //   violin → monophonic violin-filtered notes
+    //   none   → raw detected notes
+    let playNotes_: NoteEventTime[] | null | undefined;
+    if (viewMode === 'sheet') playNotes_ = sheetNotes ?? notes;
+    else if (viewMode) playNotes_ = tabNotes ?? notes;
+    else playNotes_ = notes;
+
     if (!playNotes_ || playNotes_.length === 0) return;
     const inst: InstrumentId = viewMode ? VIEW_INSTRUMENT[viewMode] : instrument;
     setPlayState('loading');
@@ -71,7 +81,7 @@ export function usePlaybackControls(
       );
       stopPlayback();
     }
-  }, [notes, tabNotes, viewMode, instrument, speed, stopPlayback]);
+  }, [notes, tabNotes, sheetNotes, viewMode, instrument, speed, stopPlayback]);
 
   const handlePlayToggle = useCallback(async () => {
     if (playState !== 'idle') {

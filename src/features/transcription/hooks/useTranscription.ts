@@ -6,6 +6,7 @@ import { useTranscribeSource } from './useTranscribeSource';
 import { useScoreExport } from './useScoreExport';
 import { usePlaybackControls } from './usePlaybackControls';
 import { getPitchRange } from '../lib/pitch-range';
+import { quantizeNotesForSheet } from '../lib/quantize';
 import type { ViewMode } from '../../../core/stores/ui.store';
 import type { TuningId } from '../../tablature/tablature.store';
 import { filterTabNotes } from '../../tablature/tab';
@@ -29,7 +30,17 @@ export function useTranscription(
     [source.notes, viewMode, tuning, capo],
   );
 
-  const playback = usePlaybackControls(source.notes, viewMode, tabNotes);
+  // Compute sheet-aligned notes — snapped to the notation grid so playback
+  // matches exactly what the piano staff shows.
+  const sheetNotes = useMemo(
+    () => {
+      if (!source.notes || source.notes.length === 0) return null;
+      return quantizeNotesForSheet(source.notes, scoreExport.scoreSettings);
+    },
+    [source.notes, scoreExport.scoreSettings],
+  );
+
+  const playback = usePlaybackControls(source.notes, viewMode, tabNotes, sheetNotes);
 
   const handleConvert = useCallback(async () => {
     playback.stopPlayback();

@@ -90,3 +90,55 @@ export function quantizeScore(notes: NoteEventTime[], settings: ScoreSettings): 
 
   return { settings, divisions, divisionsPerMeasure, numberOfMeasures, staves };
 }
+
+/**
+ * Snap raw notes to the sheet-music grid so playback matches what the
+ * staff shows. Groups same-onset notes into chords, deduplicates same-pitch
+ * overlaps, and returns clean NoteEventTime[] for the audio engine.
+ */
+export function quantizeNotesForSheet(
+  notes: NoteEventTime[],
+  settings: ScoreSettings,
+): NoteEventTime[] {
+  const divisions = Math.max(1, Math.round(settings.gridDivisionsPerQuarter));
+  const secondsPerQuarter = 60 / Math.max(1, settings.tempo);
+  const secondsPerGrid = secondsPerQuarter / divisions;
+
+  // Snap to grid.
+  const gridNotes = notes
+    .map((n) => ({
+      startUnits: Math.max(0, secondsToUnits(n.startTimeSeconds, secondsPerGrid)),
+      durUnits: Math.max(1, secondsToUnits(n.durationSeconds, secondsPerGrid)),
+      midi: Math.round(n.pitchMidi),
+      amp: n.amplitude,
+    }))
+    .filter((n) => n.midi >= 0 && n.midi <= 127);
+
+  // Group by onset → chord, dedupe same pitch (keep longer duration).
+  const byOnset = new Map<number, Map<number, { dur: number; amp: number }>>();
+  for (const n of gridNotes) {
+    let onsetMap = byOnset.get(n.startUnits);
+    if (!onsetMap) {
+      onsetMap = new Map();
+      byOnset.set(n.startUnits, onsetMap);
+    }
+    const existing = onsetMap.get(n.midi);
+    if (!existing || n.durUnits > existing.dur) {
+      onsetMap.set(n.midi, { dur: n.durUnits, amp: n.amp ?? 0.7 });
+    }
+  }
+
+  // Convert back to seconds, sorted by time.
+  const result: NoteEventTime[] = [];
+  for (const [startUnits, midiMap] of [...byOnset].sort((a, b) => a[0] - b[0])) {
+    for (const [midi, { dur, amp }] of midiMap) {
+      result.push({
+        pitchMidi: midi,
+        startTimeSeconds: startUnits * secondsPerGrid,
+        durationSeconds: dur * secondsPerGrid,
+        amplitude: amp,
+      } as NoteEventTime);
+    }
+  }
+  return result;
+}
