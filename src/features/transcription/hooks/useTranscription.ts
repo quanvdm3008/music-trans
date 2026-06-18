@@ -6,7 +6,7 @@ import { useTranscribeSource } from './useTranscribeSource';
 import { useScoreExport } from './useScoreExport';
 import { usePlaybackControls } from './usePlaybackControls';
 import { getPitchRange } from '../lib/pitch-range';
-import { quantizeNotesForSheet } from '../lib/quantize';
+import { scoreToPlaybackNotes } from '../lib/quantize';
 import type { ViewMode } from '../../../core/stores/ui.store';
 import type { TuningId } from '../../tablature/tablature.store';
 import { filterTabNotes } from '../../tablature/tab';
@@ -30,14 +30,12 @@ export function useTranscription(
     [source.notes, viewMode, tuning, capo],
   );
 
-  // Compute sheet-aligned notes — snapped to the notation grid so playback
-  // matches exactly what the piano staff shows.
+  // Playback notes read straight from the engraved score, so what you hear (and
+  // the keys that light up) is exactly what the staff shows — same notes, onsets,
+  // durations, and ties.
   const sheetNotes = useMemo(
-    () => {
-      if (!source.notes || source.notes.length === 0) return null;
-      return quantizeNotesForSheet(source.notes, scoreExport.scoreSettings);
-    },
-    [source.notes, scoreExport.scoreSettings],
+    () => (scoreExport.quantized ? scoreToPlaybackNotes(scoreExport.quantized) : null),
+    [scoreExport.quantized],
   );
 
   const playback = usePlaybackControls(source.notes, viewMode, tabNotes, sheetNotes);
@@ -66,6 +64,8 @@ export function useTranscription(
     ...playback,
     error: source.error ?? scoreExport.renderError ?? playback.playError,
     pitchRange: getPitchRange(source.notes),
+    sheetNotes,
+    tabNotes,
     handleConvert,
     loadFromUrl,
     handleRetranscribe,

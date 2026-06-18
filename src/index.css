@@ -494,3 +494,88 @@ body {
 .aurora-toggle.active::after {
   transform: translateX(22px);
 }
+
+/* ---------------- Instrument visualizers (piano roll / fretboard) ----------------
+   These were previously only defined in transcribe-workspace.css, which the live
+   TranscribePage never imports — so the fretboard/piano-roll canvases collapsed to
+   0 height and the guitar/violin neck never showed. Kept self-contained here. */
+.pianoroll {
+  border-radius: 14px;
+  overflow: hidden;
+  background: linear-gradient(180deg, #0b1530 0%, #142046 100%);
+  border: 1px solid rgba(77, 175, 255, 0.3);
+  box-shadow: inset 0 2px 12px rgba(20, 40, 90, 0.5);
+}
+.pianoroll__canvas {
+  display: block;
+  width: 100%;
+  height: 158px;
+}
+.fretboard {
+  border-radius: 14px;
+  overflow: hidden;
+  background: #2a1d12;
+  border: 1px solid rgba(77, 175, 255, 0.3);
+  box-shadow: inset 0 2px 12px rgba(0, 0, 0, 0.4);
+}
+.fretboard__canvas {
+  display: block;
+  width: 100%;
+  height: 172px;
+}
+.piano__keys {
+  position: relative;
+  height: 84px;
+  display: flex;
+  border-top: 2px solid rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+.piano__white {
+  position: relative;
+  height: 100%;
+  background: linear-gradient(180deg, #fbfcfe 0%, #e9edf3 100%);
+  border-left: 1px solid #c3c9d4;
+  border-radius: 0 0 5px 5px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 5px;
+  transition: background 0.06s, box-shadow 0.06s;
+}
+.piano__white:first-child {
+  border-left: none;
+}
+.piano__white.active {
+  background: linear-gradient(180deg, #9fd0ff 0%, #4dafff 100%);
+  box-shadow: 0 0 18px rgba(77, 175, 255, 0.8);
+}
+.piano__white.active.lh {
+  background: linear-gradient(180deg, #d4b3ff 0%, #a06bff 100%);
+  box-shadow: 0 0 18px rgba(160, 107, 255, 0.8);
+}
+.piano__label {
+  font-size: 0.6rem;
+  color: #9aa4b2;
+  pointer-events: none;
+}
+.piano__white.active .piano__label {
+  color: #0d3a6b;
+}
+.piano__black {
+  position: absolute;
+  top: 0;
+  height: 60%;
+  background: linear-gradient(180deg, #2c333f 0%, #0a0d12 100%);
+  border-radius: 0 0 4px 4px;
+  box-shadow: 0 3px 5px rgba(0, 0, 0, 0.5);
+  z-index: 2;
+  transition: background 0.06s, box-shadow 0.06s;
+}
+.piano__black.active {
+  background: linear-gradient(180deg, #7e98ff 0%, #5a72d6 100%);
+  box-shadow: 0 0 16px rgba(109, 139, 255, 0.9);
+}
+.piano__black.active.lh {
+  background: linear-gradient(180deg, #c4a4ff 0%, #8a5fe0 100%);
+  box-shadow: 0 0 16px rgba(160, 107, 255, 0.9);
+}

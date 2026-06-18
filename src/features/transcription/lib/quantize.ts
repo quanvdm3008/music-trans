@@ -23,6 +23,43 @@ export const DEFAULT_SCORE_SETTINGS: ScoreSettings = {
   splitMidi: MIDDLE_C,
 };
 
+/** A single hand can comfortably span a 10th = octave + major third = 16 semitones. */
+const MAX_HAND_SPAN = 16;
+
+/**
+ * Cap each onset-chord to one hand's reach. Real pianists can't grab notes more
+ * than ~a 10th apart with one hand, so the detector's wide vertical stacks are
+ * unplayable ("dư"). We keep the outer voice — the top note for the right hand
+ * (where the melody usually sits) and the bottom note for the left hand (the
+ * bass) — and drop anything farther than a 10th from that anchor.
+ */
+function capHandSpan<T extends { start: number; midi: number }>(
+  notes: T[],
+  keep: 'top' | 'bottom',
+  maxSpan = MAX_HAND_SPAN,
+): T[] {
+  const byOnset = new Map<number, T[]>();
+  for (const n of notes) {
+    const arr = byOnset.get(n.start);
+    if (arr) arr.push(n);
+    else byOnset.set(n.start, [n]);
+  }
+  const out: T[] = [];
+  for (const arr of byOnset.values()) {
+    if (arr.length <= 1) {
+      out.push(...arr);
+      continue;
+    }
+    const midis = arr.map((n) => n.midi);
+    const anchor = keep === 'top' ? Math.max(...midis) : Math.min(...midis);
+    for (const n of arr) {
+      const within = keep === 'top' ? n.midi >= anchor - maxSpan : n.midi <= anchor + maxSpan;
+      if (within) out.push(n);
+    }
+  }
+  return out;
+}
+
 /** Quantize note events into a full score model. */
 export function quantizeScore(notes: NoteEventTime[], settings: ScoreSettings): QuantizedScore {
   const divisions = Math.max(1, Math.round(settings.gridDivisionsPerQuarter));
@@ -64,8 +101,8 @@ export function quantizeScore(notes: NoteEventTime[], settings: ScoreSettings): 
       },
     ];
   } else {
-    const treble = quantized.filter((n) => n.midi >= settings.splitMidi);
-    const bass = quantized.filter((n) => n.midi < settings.splitMidi);
+    const treble = capHandSpan(quantized.filter((n) => n.midi >= settings.splitMidi), 'top');
+    const bass = capHandSpan(quantized.filter((n) => n.midi < settings.splitMidi), 'bottom');
     staves = [
       {
         clef: 'treble',
@@ -92,53 +129,48 @@ export function quantizeScore(notes: NoteEventTime[], settings: ScoreSettings): 
 }
 
 /**
- * Snap raw notes to the sheet-music grid so playback matches what the
- * staff shows. Groups same-onset notes into chords, deduplicates same-pitch
- * overlaps, and returns clean NoteEventTime[] for the audio engine.
+ * Turn the *engraved* score back into playable notes so the audio is exactly
+ * what the staff shows — same pitches, same onsets, same durations, with tied
+ * notes merged into one sustained note. This is the single source of truth:
+ * playback, the piano-roll highlight, and the printed sheet all read from here.
  */
-export function quantizeNotesForSheet(
-  notes: NoteEventTime[],
-  settings: ScoreSettings,
-): NoteEventTime[] {
-  const divisions = Math.max(1, Math.round(settings.gridDivisionsPerQuarter));
-  const secondsPerQuarter = 60 / Math.max(1, settings.tempo);
-  const secondsPerGrid = secondsPerQuarter / divisions;
-
-  // Snap to grid.
-  const gridNotes = notes
-    .map((n) => ({
-      startUnits: Math.max(0, secondsToUnits(n.startTimeSeconds, secondsPerGrid)),
-      durUnits: Math.max(1, secondsToUnits(n.durationSeconds, secondsPerGrid)),
-      midi: Math.round(n.pitchMidi),
-      amp: n.amplitude,
-    }))
-    .filter((n) => n.midi >= 0 && n.midi <= 127);
-
-  // Group by onset → chord, dedupe same pitch (keep longer duration).
-  const byOnset = new Map<number, Map<number, { dur: number; amp: number }>>();
-  for (const n of gridNotes) {
-    let onsetMap = byOnset.get(n.startUnits);
-    if (!onsetMap) {
-      onsetMap = new Map();
-      byOnset.set(n.startUnits, onsetMap);
-    }
-    const existing = onsetMap.get(n.midi);
-    if (!existing || n.durUnits > existing.dur) {
-      onsetMap.set(n.midi, { dur: n.durUnits, amp: n.amp ?? 0.7 });
-    }
-  }
-
-  // Convert back to seconds, sorted by time.
+export function scoreToPlaybackNotes(score: QuantizedScore): NoteEventTime[] {
+  const secondsPerGrid = 60 / Math.max(1, score.settings.tempo) / Math.max(1, score.divisions);
   const result: NoteEventTime[] = [];
-  for (const [startUnits, midiMap] of [...byOnset].sort((a, b) => a[0] - b[0])) {
-    for (const [midi, { dur, amp }] of midiMap) {
-      result.push({
-        pitchMidi: midi,
-        startTimeSeconds: startUnits * secondsPerGrid,
-        durationSeconds: dur * secondsPerGrid,
-        amplitude: amp,
-      } as NoteEventTime);
+
+  for (const staff of score.staves) {
+    // Notes mid-tie, keyed by MIDI pitch: { startUnits, durUnits }.
+    const pending = new Map<number, { startUnits: number; durUnits: number }>();
+
+    for (let m = 0; m < staff.measures.length; m++) {
+      const base = m * score.divisionsPerMeasure;
+      let cursor = 0;
+      for (const el of staff.measures[m]) {
+        const startUnits = base + cursor;
+        cursor += el.durationUnits;
+        if (el.isRest) continue;
+
+        for (const midi of el.midis) {
+          const open = pending.get(midi);
+          if (el.tieStop && open) {
+            open.durUnits += el.durationUnits;
+          } else {
+            pending.set(midi, { startUnits, durUnits: el.durationUnits });
+          }
+          if (!el.tieStart) {
+            const note = pending.get(midi)!;
+            result.push({
+              pitchMidi: midi,
+              startTimeSeconds: note.startUnits * secondsPerGrid,
+              durationSeconds: note.durUnits * secondsPerGrid,
+              amplitude: 0.7,
+            } as NoteEventTime);
+            pending.delete(midi);
+          }
+        }
+      }
     }
   }
-  return result;
+
+  return result.sort((a, b) => a.startTimeSeconds - b.startTimeSeconds);
 }

@@ -45,22 +45,35 @@ export async function playNotes(
 
   const sorted = [...notes].sort((a, b) => a.startTimeSeconds - b.startTimeSeconds);
 
+  // Legato: durations now come straight from the engraved score (note values that
+  // already touch the next note), so we only add a tiny release tail to avoid
+  // clicky cut-offs. The tail never bridges a real rest, so the audio stays in
+  // sync with the printed rhythm.
+  const LEGATO_TAIL = 0.06;
+  const legato = sorted.map((n, idx) => {
+    const ownEnd = n.startTimeSeconds + Math.max(0.08, n.durationSeconds);
+    const nextStart = idx + 1 < sorted.length ? sorted[idx + 1].startTimeSeconds : Infinity;
+    const gap = nextStart - ownEnd;
+    const tail = Math.min(LEGATO_TAIL, Math.max(0.02, gap));
+    return { ...n, durationSeconds: ownEnd + tail - n.startTimeSeconds };
+  });
+
   // Apply speed to all timings — slower speed stretches time, faster compresses it.
   const s = Math.max(0.1, Math.min(5, speed)); // clamp 0.1x–5x
 
   // Compute full total (before offset) for progress bar reference.
   let fullTotal = 0;
-  for (const n of sorted) {
+  for (const n of legato) {
     fullTotal = Math.max(fullTotal, (n.startTimeSeconds + Math.max(0.08, n.durationSeconds)) / s);
   }
 
   // Filter & shift for seek offset.
   const offset = Math.max(0, startOffsetSeconds);
   const effective = offset > 0
-    ? sorted
+    ? legato
         .filter(n => (n.startTimeSeconds + Math.max(0.08, n.durationSeconds)) / s > offset)
         .map(n => ({ ...n, startTimeSeconds: n.startTimeSeconds - offset * s }))
-    : sorted;
+    : legato;
 
   let total = 0;
   for (const n of effective) {

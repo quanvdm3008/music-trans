@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useMemo } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
   IconMusicNote, IconUpload, IconPlay, IconPause, IconZoomIn, IconZoomOut,
   IconDownload, IconShare, IconTranspose, IconCloud,
@@ -9,9 +9,10 @@ import { useTranscription } from '../features/transcription/hooks/useTranscripti
 import { ResultView } from '../features/transcription/ResultView';
 import { TabView } from '../features/tablature/TabView';
 import { Fretboard } from '../features/transcription/components/Fretboard';
+import { PianoRoll } from '../features/transcription/components/PianoRoll';
+import { getPitchRange } from '../features/transcription/lib/pitch-range';
 import { useTablatureStore, TUNINGS } from '../features/tablature/tablature.store';
 import { useUiStore, VIEW_MODES, type ViewMode } from '../core/stores/ui.store';
-import { usePlaybackStore } from '../core/stores/playback.store';
 import { downloadFile } from '../shared/lib/utils';
 import { detectKey, detectChordsFromNotes } from '../core/music/chords';
 
@@ -168,6 +169,7 @@ function AiDashboardSection({
   transcribeOptions, onTranscribeOption, onRetranscribe,
   scoreSettings, onScoreSetting,
   instrument, onInstrument,
+  isPlaying, getTime,
 }: {
   file: File | null; fileName: string; status: string; progress: number;
   notes: { pitchMidi: number; startTimeSeconds: number; durationSeconds: number }[] | null;
@@ -181,6 +183,8 @@ function AiDashboardSection({
   onScoreSetting?: (patch: Record<string, number | string>) => void;
   instrument?: string;
   onInstrument?: (id: string) => void;
+  isPlaying?: boolean;
+  getTime?: () => number | null;
 }) {
   const noteCount = notes?.length ?? 0;
   const pageCount = svgPages?.length ?? 0;
@@ -191,6 +195,38 @@ function AiDashboardSection({
 
   const downloadMidi = () => { if (midiBytes) downloadFile(midiBytes, `${fileName || 'output'}.mid`, 'audio/midi'); };
   const downloadXml = () => { if (musicXml) downloadFile(musicXml, `${fileName || 'output'}.musicxml`, 'application/vnd.recordare.musicxml+xml'); };
+
+  const chords = useMemo(
+    () => barChords ?? (notes ? detectChordsFromNotes(notes, 200) : []),
+    [barChords, notes],
+  );
+
+  // Track which chord is currently sounding so the list can highlight it.
+  const [activeChordIdx, setActiveChordIdx] = useState<number | null>(null);
+  const chordListRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!isPlaying || !getTime || chords.length === 0) { setActiveChordIdx(null); return; }
+    let raf = 0;
+    const loop = () => {
+      const t = getTime();
+      if (t != null) {
+        let idx = -1;
+        for (let i = 0; i < chords.length; i++) { if (chords[i].time <= t) idx = i; else break; }
+        setActiveChordIdx(idx >= 0 ? idx : null);
+      }
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [isPlaying, getTime, chords]);
+
+  // Keep the active row in view inside the card's own scroll area (never the page).
+  useEffect(() => {
+    if (activeChordIdx == null) return;
+    const container = chordListRef.current;
+    const row = container?.querySelector<HTMLElement>(`[data-chord-idx="${activeChordIdx}"]`);
+    row?.scrollIntoView({ block: 'nearest' });
+  }, [activeChordIdx]);
 
   return (
     <section id="dashboard" className="ms-section" style={{ paddingTop: '1rem' }}>
@@ -388,53 +424,71 @@ function AiDashboardSection({
         </div>
 
         {/* RIGHT COLUMN: Chord Progression — vertical grid */}
-        <div className="card-white p-5 flex flex-col">
+        <div className="card-white p-5 flex flex-col" style={{ boxShadow: 'var(--ms-shadow-md)' }}>
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--ms-muted)' }}>
-              <IconChord className="w-4 h-4" /> Chord Progression
+            <h3 className="text-sm font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--ms-ink)' }}>
+              <span className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: 'var(--ms-gradient)' }}>
+                <IconChord className="w-4 h-4 text-white" />
+              </span>
+              Chord Progression
             </h3>
-            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: 'var(--ms-mint-soft)', color: 'var(--ms-mint)' }}>
-              {hasResult ? `${barChords?.length ?? 0} chords` : 'No data'}
+            <span className="text-[10px] font-semibold px-2.5 py-1 rounded-full flex items-center gap-1.5" style={{ background: 'var(--ms-mint-soft)', color: 'var(--ms-mint)' }}>
+              {isPlaying && <span className="w-1.5 h-1.5 rounded-full bg-ms-mint animate-pulse-soft" />}
+              {hasResult ? `${chords.length} chords` : 'No data'}
             </span>
           </div>
 
-          <div className="flex-1 overflow-y-auto studio-scroll" style={{ maxHeight: '420px' }}>
+          <div ref={chordListRef} className="flex-1 overflow-y-auto studio-scroll pr-1" style={{ maxHeight: '420px' }}>
             {!hasResult ? (
               <div className="flex items-center justify-center h-32 text-sm text-center" style={{ color: 'var(--ms-muted-light)' }}>
                 <div><IconCloud className="w-8 h-8 mx-auto mb-2 opacity-20" /><p className="text-xs">Upload & convert to see chords</p></div>
               </div>
+            ) : chords.length === 0 ? (
+              <p className="text-xs text-center py-8" style={{ color: 'var(--ms-muted-light)' }}>No chords detected</p>
             ) : (
-              (() => {
-                const realChords = barChords ?? (notes ? detectChordsFromNotes(notes, 200) : []);
-                if (realChords.length === 0) return <p className="text-xs text-center py-8" style={{ color: 'var(--ms-muted-light)' }}>No chords detected</p>;
-                return (
-                  <div className="space-y-2">
-                    {realChords.slice(0, 16).map((ch, i) => (
-                      <div key={i} className="flex items-center gap-3 p-2.5 rounded-xl transition-colors hover:bg-white/50"
-                        style={{ background: i % 2 === 0 ? 'var(--ms-bg-alt)' : 'transparent' }}>
-                        {/* Bar number */}
-                        <div className="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold shrink-0"
-                          style={{ background: 'var(--ms-mint-soft)', color: 'var(--ms-mint)' }}>
-                          {i + 1}
-                        </div>
-                        {/* Chord name */}
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm font-extrabold" style={{ color: 'var(--ms-ink)', fontFamily: 'var(--font-display)' }}>{ch.chord.name}</div>
-                          <div className="text-[10px]" style={{ color: 'var(--ms-muted-light)' }}>{ch.chord.explanation?.slice(0, 60) || ''}</div>
-                        </div>
-                        {/* Time */}
-                        <div className="text-[10px] font-semibold shrink-0" style={{ color: 'var(--ms-muted)' }}>
-                          {(() => { const m = Math.floor(ch.time / 60); const s = Math.floor(ch.time % 60); return `${m}:${String(s).padStart(2, '0')}`; })()}
-                        </div>
-                        {/* Confidence bar */}
-                        <div className="w-12 h-1.5 rounded-full shrink-0" style={{ background: 'var(--ms-border)' }}>
-                          <div className="h-full rounded-full" style={{ width: `${Math.round(ch.chord.confidence * 100)}%`, background: 'var(--ms-mint)' }} />
-                        </div>
+              <div className="flex flex-col gap-1.5">
+                {chords.map((ch, i) => {
+                  const active = i === activeChordIdx;
+                  return (
+                    <div
+                      key={i}
+                      data-chord-idx={i}
+                      className="relative flex items-center gap-3 p-2.5 rounded-xl transition-all duration-200"
+                      style={{
+                        background: active ? 'var(--ms-primary-soft)' : i % 2 === 0 ? 'var(--ms-bg-alt)' : 'transparent',
+                        boxShadow: active ? '0 0 0 1.5px var(--ms-primary)' : 'none',
+                        transform: active ? 'scale(1.015)' : 'scale(1)',
+                      }}
+                    >
+                      {active && (
+                        <span className="absolute left-0 top-1.5 bottom-1.5 w-1 rounded-full" style={{ background: 'var(--ms-gradient)' }} />
+                      )}
+                      {/* Bar number */}
+                      <div
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 transition-colors duration-200"
+                        style={active
+                          ? { background: 'var(--ms-gradient)', color: 'white' }
+                          : { background: 'var(--ms-mint-soft)', color: 'var(--ms-mint)' }}
+                      >
+                        {i + 1}
                       </div>
-                    ))}
-                  </div>
-                );
-              })()
+                      {/* Chord name */}
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-extrabold" style={{ color: active ? 'var(--ms-primary)' : 'var(--ms-ink)', fontFamily: 'var(--font-display)' }}>{ch.chord.name}</div>
+                        <div className="text-[10px] truncate" style={{ color: 'var(--ms-muted-light)' }}>{ch.chord.explanation?.slice(0, 60) || ''}</div>
+                      </div>
+                      {/* Time */}
+                      <div className="text-[10px] font-semibold shrink-0" style={{ color: active ? 'var(--ms-primary)' : 'var(--ms-muted)' }}>
+                        {(() => { const m = Math.floor(ch.time / 60); const s = Math.floor(ch.time % 60); return `${m}:${String(s).padStart(2, '0')}`; })()}
+                      </div>
+                      {/* Confidence bar */}
+                      <div className="w-12 h-1.5 rounded-full shrink-0 overflow-hidden" style={{ background: 'var(--ms-border)' }}>
+                        <div className="h-full rounded-full transition-all duration-300" style={{ width: `${Math.round(ch.chord.confidence * 100)}%`, background: active ? 'var(--ms-primary)' : 'var(--ms-mint)' }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
         </div>
@@ -448,10 +502,11 @@ function AiDashboardSection({
 /*  4. ENHANCED SHEET MUSIC + GUITAR TAB PREVIEWER                     */
 /* ================================================================== */
 function SheetMusicPreviewerSection({
-  svgPages, rendering, notes, isPlaying, viewMode, setViewMode,
+  svgPages, rendering, notes, playbackNotes, isPlaying, viewMode, setViewMode,
   onPlayToggle, getTime, musicXml, midiBytes, fileName, barChords, barDuration,
 }: {
   svgPages: string[] | null; rendering: boolean; notes: { pitchMidi: number; startTimeSeconds: number; durationSeconds: number }[] | null;
+  playbackNotes: { pitchMidi: number; startTimeSeconds: number; durationSeconds: number }[] | null;
   isPlaying: boolean; playProgress: number; viewMode: ViewMode; setViewMode: (m: ViewMode) => void;
   onPlayToggle: () => void; getTime: () => number | null; musicXml: string | null;
   midiBytes: Uint8Array | null; fileName: string;
@@ -464,8 +519,63 @@ function SheetMusicPreviewerSection({
   const hasResult = Boolean(svgPages && svgPages.length > 0);
   const isTabMode = viewMode === 'tab' || viewMode === 'violin';
   const isViolin = viewMode === 'violin';
-  const currentInstrument: string = isViolin ? 'violin' : 'guitar';
   const tuningLabel = isViolin ? 'G D A E' : (tuning === 'dropD' ? 'D A D G B e' : 'E A D G B e');
+  // Piano-roll reads the sheet-derived notes so the keys that light up match the staff + audio.
+  const pianoNotes = playbackNotes ?? notes;
+  const pitchRange = getPitchRange((pianoNotes as any) ?? null);
+
+  // Auto-scroll: while playing, keep the current spot in view ("nhạc tới đâu cuộn tới đó").
+  const followRef = useRef<HTMLDivElement>(null);
+  const followNotes = isTabMode ? notes : pianoNotes;
+  const totalSeconds = useMemo(() => {
+    let max = 0;
+    for (const n of followNotes ?? []) max = Math.max(max, n.startTimeSeconds + Math.max(0.1, n.durationSeconds));
+    return max;
+  }, [followNotes]);
+  useEffect(() => {
+    if (!isPlaying || totalSeconds <= 0) return;
+    const el = followRef.current;
+    if (!el) return;
+    // Read layout once (not every frame) to avoid forced-reflow jank while
+    // the canvas visualizers are also drawing via their own rAF loops.
+    const docTop = window.scrollY + el.getBoundingClientRect().top;
+    const usable = el.offsetHeight - window.innerHeight + 160;
+    if (usable <= 0) return;
+
+    let raf = 0;
+    let lastTarget = -1;
+    // If the user manually scrolls away (e.g. to read the tab further down),
+    // back off for a few seconds instead of yanking the page back — that
+    // "kéo lên giữa trang" snap-back was us fighting the user's own scroll.
+    let pausedUntil = 0;
+    const onUserScroll = () => { pausedUntil = performance.now() + 4000; };
+    window.addEventListener('wheel', onUserScroll, { passive: true });
+    window.addEventListener('touchmove', onUserScroll, { passive: true });
+
+    const loop = () => {
+      const t = getTime();
+      if (t != null && performance.now() >= pausedUntil) {
+        const frac = Math.max(0, Math.min(1, t / totalSeconds));
+        const target = docTop + frac * usable - 80;
+        // Only touch the scroll position when it actually moved enough to
+        // matter — calling scrollTo every frame is what caused the stutter.
+        if (Math.abs(target - lastTarget) >= 1) {
+          // `behavior: 'instant'` overrides the global CSS `scroll-behavior:
+          // smooth` — without it, the browser's smooth-scroll animation keeps
+          // chasing a target that moves every frame, which looks like jitter.
+          window.scrollTo({ top: target, behavior: 'instant' as ScrollBehavior });
+          lastTarget = target;
+        }
+      }
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('wheel', onUserScroll);
+      window.removeEventListener('touchmove', onUserScroll);
+    };
+  }, [isPlaying, getTime, totalSeconds]);
 
   const downloadMidi = () => { if (midiBytes) downloadFile(midiBytes, `${fileName || 'output'}.mid`, 'audio/midi'); };
   const downloadXml = () => { if (musicXml) downloadFile(musicXml, `${fileName || 'output'}.musicxml`, 'application/vnd.recordare.musicxml+xml'); };
@@ -557,7 +667,7 @@ function SheetMusicPreviewerSection({
         )}
 
         {/* Canvas: Sheet Music OR Tab */}
-        <div className="flex flex-col" style={{ background: 'white', minHeight: '380px' }}>
+        <div ref={followRef} className="flex flex-col" style={{ background: 'white', minHeight: '380px' }}>
           {!hasResult ? (
             <div className="flex-1 flex items-center justify-center p-10 text-center" style={{ color: 'var(--ms-muted-light)' }}>
               <div>
@@ -567,18 +677,37 @@ function SheetMusicPreviewerSection({
               </div>
             </div>
           ) : !isTabMode ? (
-            /* === Piano Sheet Music === */
-            <div className="flex-1 flex items-start justify-center p-6 md:p-10 overflow-x-auto" style={{ minHeight: '380px' }}>
-              <div className="transition-transform duration-300" style={{ transform: `scale(${zoom / 100})`, transformOrigin: 'center top' }}>
-                {rendering && <p className="text-sm text-center py-4" style={{ color: 'var(--ms-muted)' }}>Rendering sheet music…</p>}
-                <ResultView
-                  viewMode="sheet"
-                  svgPages={svgPages}
-                  rendering={rendering}
-                  notes={(notes as any) ?? []}
-                  isPlaying={isPlaying}
-                  getTime={getTime}
-                />
+            /* === Piano: keyboard visualizer + Sheet Music === */
+            <div className="flex flex-col">
+              {/* Piano keyboard — keys light up during playback ("thế tay") */}
+              <div className="p-4 pb-1">
+                <div className="card-white overflow-hidden w-full" style={{ borderRadius: 'var(--ms-radius-lg)' }}>
+                  <div className="px-4 py-2 flex items-center gap-2" style={{ borderBottom: '1px solid var(--ms-border)', background: '#FAFBFC' }}>
+                    <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--ms-muted)' }}>🎹 Piano Keys</span>
+                    <span className="text-[9px] ml-auto" style={{ color: 'var(--ms-muted-light)' }}>Keys light up during playback</span>
+                  </div>
+                  <PianoRoll
+                    notes={(pianoNotes as any) ?? []}
+                    lowMidi={pitchRange.low}
+                    highMidi={pitchRange.high}
+                    isPlaying={isPlaying}
+                    getTime={getTime}
+                  />
+                </div>
+              </div>
+
+              <div className="flex-1 flex items-start justify-center p-6 md:p-10 overflow-x-auto" style={{ minHeight: '380px' }}>
+                <div className="transition-transform duration-300" style={{ transform: `scale(${zoom / 100})`, transformOrigin: 'center top' }}>
+                  {rendering && <p className="text-sm text-center py-4" style={{ color: 'var(--ms-muted)' }}>Rendering sheet music…</p>}
+                  <ResultView
+                    viewMode="sheet"
+                    svgPages={svgPages}
+                    rendering={rendering}
+                    notes={(notes as any) ?? []}
+                    isPlaying={isPlaying}
+                    getTime={getTime}
+                  />
+                </div>
               </div>
             </div>
           ) : (
@@ -595,7 +724,8 @@ function SheetMusicPreviewerSection({
                       <span className="text-[9px] ml-auto" style={{ color: 'var(--ms-muted-light)' }}>Notes light up during playback</span>
                     </div>
                     <Fretboard
-                      instrument={currentInstrument as any}
+                      tuning={isViolin ? 'violin' : tuning}
+                      capo={capo}
                       notes={(notes as any) ?? []}
                       isPlaying={isPlaying}
                       getTime={getTime}
@@ -673,7 +803,6 @@ function Footer() {
 export function TranscribePage() {
   const { viewMode, setViewMode } = useUiStore();
   const { tuning, capo } = useTablatureStore();
-  const { setSpeed } = usePlaybackStore();
   const t = useTranscription(viewMode, tuning, capo);
   const noteCount = t.notes?.length ?? 0;
   const hasFile = Boolean(t.file);
@@ -689,13 +818,12 @@ export function TranscribePage() {
     return detectChordsFromNotes(t.notes as any, 1500);
   }, [t.notes]);
 
-  // Wrap onScoreSetting to also sync playback speed when tempo changes.
+  // Tempo is baked straight into the note times by scoreToPlaybackNotes, so the
+  // audio engine plays at speed 1.0 — applying tempo again as a speed multiplier
+  // would warp the sound out of sync with the on-screen notes.
   const handleScoreSetting = useCallback((p: Record<string, number | string>) => {
     (t.setScoreSettings as any)?.((prev: any) => ({ ...prev, ...p }));
-    if ('tempo' in p && typeof p.tempo === 'number') {
-      setSpeed(p.tempo / 120); // normalize: 120 BPM = 1.0x speed
-    }
-  }, [t.setScoreSettings, setSpeed]);
+  }, [t.setScoreSettings]);
 
   return (
     <>
@@ -730,6 +858,8 @@ export function TranscribePage() {
           onScoreSetting={handleScoreSetting}
           instrument={t.instrument}
           onInstrument={(id) => t.setInstrument?.(id as any)}
+          isPlaying={t.playState === 'playing'}
+          getTime={t.getPlaybackTime}
         />
       )}
 
@@ -738,6 +868,7 @@ export function TranscribePage() {
           svgPages={t.svgPages}
           rendering={t.rendering}
           notes={t.notes as any}
+          playbackNotes={t.sheetNotes as any}
           isPlaying={t.playState === 'playing'}
           playProgress={t.playProgress}
           viewMode={viewMode}

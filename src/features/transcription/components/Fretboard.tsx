@@ -1,29 +1,32 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { midiToNoteName } from '../../../core/music/notation';
 import type { NoteEventTime } from '../../../core/music/note-event';
-import type { InstrumentId } from '../../../core/audio/player';
+import { OPEN_PITCHES } from '../../tablature/tab';
+import type { TuningId } from '../../tablature/tablature.store';
 
 interface FretboardProps {
-  instrument: InstrumentId;
+  /** Which tuning is selected (drives string count + open pitches). */
+  tuning: TuningId;
+  /** Capo fret (guitar only). Shifts every open string up by this many semitones. */
+  capo?: number;
   notes: NoteEventTime[];
   isPlaying: boolean;
   getTime: () => number | null;
 }
 
-// Open-string MIDI pitches, ordered top (highest) → bottom (lowest), like tab.
-const TUNINGS: Record<string, number[]> = {
-  guitar: [64, 59, 55, 50, 45, 40], // e B G D A E
-  eguitar: [64, 59, 55, 50, 45, 40],
-  violin: [76, 69, 62, 55], // E A D G
-};
 const FRET_COUNT = 15;
 const MARKER_FRETS = [3, 5, 7, 9, 12];
 
-/** Map a MIDI note to the playable (stringIndex, fret) with the smallest fret. */
-function position(midi: number, tuning: number[]): { s: number; fret: number } | null {
+/**
+ * Map a MIDI note to the playable (stringIndex, fret) with the smallest fret,
+ * relative to the capo. `open` are the base open-string pitches; the capo raises
+ * each by `capo` semitones, so the displayed fret is read from the capo (the way
+ * a guitarist actually fingers it) and stays in sync with the tab.
+ */
+function position(midi: number, open: number[], capo: number): { s: number; fret: number } | null {
   let best: { s: number; fret: number } | null = null;
-  for (let s = 0; s < tuning.length; s++) {
-    const fret = midi - tuning[s];
+  for (let s = 0; s < open.length; s++) {
+    const fret = midi - (open[s] + capo);
     if (fret >= 0 && fret <= FRET_COUNT) {
       if (!best || fret < best.fret) best = { s, fret };
     }
@@ -32,8 +35,9 @@ function position(midi: number, tuning: number[]): { s: number; fret: number } |
 }
 
 /** A fretboard view (guitar/violin) that lights up notes as they play. */
-export function Fretboard({ instrument, notes, isPlaying, getTime }: FretboardProps) {
-  const tuning = TUNINGS[instrument] ?? TUNINGS.guitar;
+export function Fretboard({ tuning: tuningId, capo = 0, notes, isPlaying, getTime }: FretboardProps) {
+  const tuning = OPEN_PITCHES[tuningId] ?? OPEN_PITCHES.standard;
+  const effectiveCapo = tuningId === 'violin' ? 0 : capo;
 
   const rollNotes = useMemo(
     () =>
@@ -138,7 +142,7 @@ export function Fretboard({ instrument, notes, isPlaying, getTime }: FretboardPr
       if (t != null) {
         for (const n of rollNotes) {
           if (n.s > t || n.e <= t) continue;
-          const pos = position(n.m, tuning);
+          const pos = position(n.m, tuning, effectiveCapo);
           if (!pos) continue;
           const x = cellX(pos.fret);
           const y = stringY(pos.s);
@@ -166,7 +170,7 @@ export function Fretboard({ instrument, notes, isPlaying, getTime }: FretboardPr
       cancelAnimationFrame(raf);
       ro.disconnect();
     };
-  }, [tuning, rollNotes, isPlaying, getTime]);
+  }, [tuning, effectiveCapo, rollNotes, isPlaying, getTime]);
 
   return (
     <div className="fretboard">

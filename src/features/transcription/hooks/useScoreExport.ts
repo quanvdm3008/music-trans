@@ -58,5 +58,5 @@ export function useScoreExport(notes: NoteEventTime[] | null, title: string) {
     };
   }, [musicXml]);
 
-  return { scoreSettings, setScoreSettings, musicXml, midiBytes, svgPages, rendering, renderError };
+  return { scoreSettings, setScoreSettings, quantized, musicXml, midiBytes, svgPages, rendering, renderError };
 }

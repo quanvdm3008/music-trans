@@ -10,7 +10,7 @@ import type { InstrumentId } from '../audio/player';
 interface PlaybackState {
   instrument: InstrumentId;
   loop: boolean;
-  speed: number; // 0.5 – 1.5 (reserved for Phase 1 speed control)
+  speed: number; // user practice-speed multiplier (1 = play exactly as notated)
   setInstrument: (id: InstrumentId) => void;
   toggleLoop: () => void;
   setSpeed: (speed: number) => void;
@@ -26,6 +26,6 @@ export const usePlaybackStore = create<PlaybackState>()(
       toggleLoop: () => set((s) => ({ loop: !s.loop })),
       setSpeed: (speed) => set({ speed }),
     }),
-    { name: 'skyscore.playback' },
+    { name: 'skyscore.playback.v2' },
   ),
 );

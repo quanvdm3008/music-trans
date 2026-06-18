@@ -8,14 +8,22 @@ interface PianoRollProps {
   highMidi: number;
   isPlaying: boolean;
   getTime: () => number | null;
+  /** Notes >= this MIDI are the right hand (treble); below it, the left hand (bass). */
+  splitMidi?: number;
 }
 
 const WHITE_PC = [0, 2, 4, 5, 7, 9, 11];
 const isWhite = (m: number) => WHITE_PC.includes(((m % 12) + 12) % 12);
 const LOOKAHEAD = 3.0; // seconds of upcoming notes visible in the waterfall
 
+// Two-hand palette: right hand = blue, left hand = purple. [top, bottom] stops.
+const HAND_COLORS = {
+  rh: { white: { hit: ['#9db4ff', '#6d8bff'], idle: ['#6d8bff', '#4a63cc'] }, black: { hit: ['#b9c8ff', '#8aa0ff'], idle: ['#7e98ff', '#5a72d6'] } },
+  lh: { white: { hit: ['#d4b3ff', '#b07bff'], idle: ['#a06bff', '#7a4bcc'] }, black: { hit: ['#e0c7ff', '#c4a4ff'], idle: ['#b08aff', '#8a5fe0'] } },
+} as const;
+
 /** Synthesia-style falling notes above a virtual piano that lights up in sync. */
-export function PianoRoll({ notes, lowMidi, highMidi, isPlaying, getTime }: PianoRollProps) {
+export function PianoRoll({ notes, lowMidi, highMidi, isPlaying, getTime, splitMidi = 60 }: PianoRollProps) {
   const layout = useMemo(() => {
     const lo = Math.max(21, Math.floor(lowMidi / 12) * 12);
     const hi = Math.min(108, Math.ceil((highMidi + 1) / 12) * 12 - 1);
@@ -109,14 +117,11 @@ export function PianoRoll({ notes, lowMidi, highMidi, isPlaying, getTime }: Pian
           const hit = note.s <= t && t < note.e;
           if (hit) sounding.push(note.m);
 
+          const hand = note.m >= splitMidi ? 'rh' : 'lh';
+          const stops = HAND_COLORS[hand][white ? 'white' : 'black'][hit ? 'hit' : 'idle'];
           const grad = ctx.createLinearGradient(0, y, 0, y + hh);
-          if (white) {
-            grad.addColorStop(0, hit ? '#9db4ff' : '#6d8bff');
-            grad.addColorStop(1, hit ? '#6d8bff' : '#4a63cc');
-          } else {
-            grad.addColorStop(0, hit ? '#c0a4ff' : '#a06bff');
-            grad.addColorStop(1, hit ? '#8a6bff' : '#6d4bcc');
-          }
+          grad.addColorStop(0, stops[0]);
+          grad.addColorStop(1, stops[1]);
           ctx.fillStyle = grad;
           if (ctx.roundRect) {
             ctx.beginPath();
@@ -126,7 +131,7 @@ export function PianoRoll({ notes, lowMidi, highMidi, isPlaying, getTime }: Pian
             ctx.fillRect(px, y, pw, hh);
           }
           if (hit) {
-            ctx.shadowColor = white ? 'rgba(109,139,255,0.9)' : 'rgba(160,107,255,0.9)';
+            ctx.shadowColor = hand === 'rh' ? 'rgba(109,139,255,0.9)' : 'rgba(160,107,255,0.9)';
             ctx.shadowBlur = 14;
             ctx.fillRect(px, H - 3, pw, 3);
             ctx.shadowBlur = 0;
@@ -159,10 +164,11 @@ export function PianoRoll({ notes, lowMidi, highMidi, isPlaying, getTime }: Pian
         {layout.whites.map((m) => {
           const r = layout.keyRect(m);
           const isC = m % 12 === 0;
+          const hand = m >= splitMidi ? 'rh' : 'lh';
           return (
             <div
               key={m}
-              className={`piano__white${active.has(m) ? ' active' : ''}`}
+              className={`piano__white${active.has(m) ? ` active ${hand}` : ''}`}
               style={{ width: `${r.w * 100}%` }}
             >
               {isC && <span className="piano__label">{midiToNoteName(m)}</span>}
@@ -176,7 +182,7 @@ export function PianoRoll({ notes, lowMidi, highMidi, isPlaying, getTime }: Pian
             return (
               <div
                 key={m}
-                className={`piano__black${active.has(m) ? ' active' : ''}`}
+                className={`piano__black${active.has(m) ? ` active ${m >= splitMidi ? 'rh' : 'lh'}` : ''}`}
                 style={{ left: `${r.x * 100}%`, width: `${r.w * 100}%` }}
               />
             );
