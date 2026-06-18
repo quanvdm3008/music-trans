@@ -44,10 +44,11 @@ export async function playNotes(
     total = Math.max(total, n.startTimeSeconds + Math.max(0.08, n.durationSeconds));
   }
 
-  // Lookahead scheduler: schedule only the next ~0.6 s of notes each tick, so
-  // we never block the main thread by creating thousands of nodes at once.
-  const t0 = ac.currentTime + 0.2;
-  const SCHEDULE_AHEAD = 0.6;
+  // Lookahead scheduler: schedule ahead more aggressively for smoother playback.
+  // Larger SCHEDULE_AHEAD + tighter tick interval = fewer buffer underruns.
+  const t0 = ac.currentTime + 0.25;
+  const SCHEDULE_AHEAD = 1.5;  // schedule 1.5s ahead (was 0.6s)
+  const TICK_MS = 25;           // check every 25ms (was 50ms)
   let i = 0;
   const scheduleDue = () => {
     const horizon = ac.currentTime - t0 + SCHEDULE_AHEAD;
@@ -60,7 +61,7 @@ export async function playNotes(
     if (i >= sorted.length) window.clearInterval(schedulerId);
   };
   scheduleDue(); // schedule the first batch immediately
-  const schedulerId = window.setInterval(scheduleDue, 50);
+  const schedulerId = window.setInterval(scheduleDue, TICK_MS);
 
   const endTimer = window.setTimeout(onEnd, (total + 0.6) * 1000);
 
