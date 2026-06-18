@@ -9,8 +9,8 @@ export const BASE_PPS = 240; // px per second — wide spacing so notes never ov
 export const PAD_L = 48;
 export const PAD_R = 32;
 export const ROW_TOP = 48;
-export const ROW_HEIGHT = 140; // taller for more string spacing
-export const ROW_GAP = 36;
+export const ROW_HEIGHT = 160; // taller for more string spacing
+export const ROW_GAP = 56;
 export const NOTE_R = 10; // smaller circles — fit between strings without overlap
 
 export function stringY(row: number, s: number, nStrings: number): number {
