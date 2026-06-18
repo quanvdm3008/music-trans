@@ -267,7 +267,7 @@ export function TabView({ notes, isPlaying, getTime, chords: externalChords, bar
           ctx.lineWidth = 2.5;
           ctx.beginPath();
           ctx.moveTo(px, rTop + 6);
-          ctx.lineTo(px, rTop + ROW_HEIGHT + 6);
+          ctx.lineTo(px, rTop + ROW_HEIGHT + ROW_GAP - 4);
           ctx.stroke();
           ctx.fillStyle = '#0EA5E9';
           ctx.beginPath();

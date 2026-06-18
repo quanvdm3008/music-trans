@@ -9,9 +9,10 @@ import { midiToNoteName } from '../../core/music/notation';
 import type { TuningId } from './tablature.store';
 
 const FRET_COUNT = 18;
-/** Notes within this many seconds share a tab column (chord). Tight — only truly simultaneous notes merge. */
 const COLUMN_EPSILON = 0.06;
 const MIN_HOLD_SECONDS = 0.08;
+/** Minimum spacing between columns in seconds (= eighth note at 120 BPM) */
+const MIN_COLUMN_SPACING = 0.25;
 
 // Open-string MIDI pitches, ordered top (highest) → bottom (lowest), like tab.
 const OPEN_PITCHES: Record<TuningId, number[]> = {
@@ -70,6 +71,14 @@ export function generateTab(notes: NoteEventTime[], tuning: TuningId, capo = 0):
       frets[pos.s] = pos.fret;
       untilArr[pos.s] = until;
       columns.push({ frets, until: untilArr, time: note.startTimeSeconds });
+    }
+  }
+
+  // Post-process: enforce minimum spacing (= eighth note) so notes never overlap
+  for (let i = 1; i < columns.length; i++) {
+    const gap = columns[i].time - columns[i - 1].time;
+    if (gap < MIN_COLUMN_SPACING) {
+      columns[i].time = columns[i - 1].time + MIN_COLUMN_SPACING;
     }
   }
 
