@@ -25,13 +25,16 @@ export interface PlaybackHandle {
 }
 
 /**
- * Schedule all notes on the piano. `onEnd` fires once when playback finishes
- * naturally. Returns a handle to stop early.
+ * Schedule all notes for playback.
+ *
+ * @param speed  Playback speed multiplier (1.0 = normal, 0.5 = half, 2.0 = double).
+ *               Affects all note start times, durations, and total length.
  */
 export async function playNotes(
   notes: NoteEventTime[],
   onEnd: () => void,
   instrument: InstrumentId = 'piano',
+  speed = 1.0,
 ): Promise<PlaybackHandle> {
   const ac = getCtx();
   if (ac.state === 'suspended') await ac.resume();
@@ -39,9 +42,12 @@ export async function playNotes(
   const inst = await loadInstrument(ac, instrument);
 
   const sorted = [...notes].sort((a, b) => a.startTimeSeconds - b.startTimeSeconds);
+
+  // Apply speed to all timings — slower speed stretches time, faster compresses it.
+  const s = Math.max(0.1, Math.min(5, speed)); // clamp 0.1x–5x
   let total = 0;
   for (const n of sorted) {
-    total = Math.max(total, n.startTimeSeconds + Math.max(0.08, n.durationSeconds));
+    total = Math.max(total, (n.startTimeSeconds + Math.max(0.08, n.durationSeconds)) / s);
   }
 
   // Lookahead scheduler: schedule ahead more aggressively for smoother playback.
@@ -51,12 +57,12 @@ export async function playNotes(
   const TICK_MS = 25;           // check every 25ms (was 50ms)
   let i = 0;
   const scheduleDue = () => {
-    const horizon = ac.currentTime - t0 + SCHEDULE_AHEAD;
-    while (i < sorted.length && sorted[i].startTimeSeconds <= horizon) {
+    const horizon = (ac.currentTime - t0) + SCHEDULE_AHEAD;
+    while (i < sorted.length && (sorted[i].startTimeSeconds / s) <= horizon) {
       const n = sorted[i++];
-      const duration = Math.max(0.08, n.durationSeconds);
+      const duration = Math.max(0.08, n.durationSeconds) / s;
       const gain = Math.min(1, Math.max(0.25, Number.isFinite(n.amplitude) ? n.amplitude : 0.7));
-      inst.play(Math.round(n.pitchMidi), t0 + Math.max(0, n.startTimeSeconds), duration, gain);
+      inst.play(Math.round(n.pitchMidi), t0 + Math.max(0, n.startTimeSeconds / s), duration, gain);
     }
     if (i >= sorted.length) window.clearInterval(schedulerId);
   };
@@ -68,7 +74,7 @@ export async function playNotes(
   return {
     totalSeconds: total,
     source: inst.source,
-    currentTime: () => Math.max(0, ac.currentTime - t0),
+    currentTime: () => Math.max(0, (ac.currentTime - t0)),
     stop: () => {
       window.clearInterval(schedulerId);
       window.clearTimeout(endTimer);

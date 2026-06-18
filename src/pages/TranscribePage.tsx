@@ -11,6 +11,7 @@ import { TabView } from '../features/tablature/TabView';
 import { Fretboard } from '../features/transcription/components/Fretboard';
 import { useTablatureStore, TUNINGS } from '../features/tablature/tablature.store';
 import { useUiStore, VIEW_MODES, type ViewMode } from '../core/stores/ui.store';
+import { usePlaybackStore } from '../core/stores/playback.store';
 import { downloadFile } from '../shared/lib/utils';
 import { detectKey, detectChordsFromNotes } from '../core/music/chords';
 
@@ -672,6 +673,7 @@ function Footer() {
 export function TranscribePage() {
   const { viewMode, setViewMode } = useUiStore();
   const { tuning, capo } = useTablatureStore();
+  const { setSpeed } = usePlaybackStore();
   const t = useTranscription(viewMode, tuning, capo);
   const noteCount = t.notes?.length ?? 0;
   const hasFile = Boolean(t.file);
@@ -686,6 +688,14 @@ export function TranscribePage() {
     // close together regardless of BPM setting.
     return detectChordsFromNotes(t.notes as any, 1500);
   }, [t.notes]);
+
+  // Wrap onScoreSetting to also sync playback speed when tempo changes.
+  const handleScoreSetting = useCallback((p: Record<string, number | string>) => {
+    (t.setScoreSettings as any)?.((prev: any) => ({ ...prev, ...p }));
+    if ('tempo' in p && typeof p.tempo === 'number') {
+      setSpeed(p.tempo / 120); // normalize: 120 BPM = 1.0x speed
+    }
+  }, [t.setScoreSettings, setSpeed]);
 
   return (
     <>
@@ -717,7 +727,7 @@ export function TranscribePage() {
           onTranscribeOption={(p) => t.setTranscribeOptions?.((prev: any) => ({ ...prev, ...p }))}
           onRetranscribe={t.handleRetranscribe}
           scoreSettings={t.scoreSettings as any}
-          onScoreSetting={(p) => t.setScoreSettings?.((prev: any) => ({ ...prev, ...p }))}
+          onScoreSetting={handleScoreSetting}
           instrument={t.instrument}
           onInstrument={(id) => t.setInstrument?.(id as any)}
         />

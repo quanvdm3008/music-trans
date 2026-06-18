@@ -27,7 +27,7 @@ export function usePlaybackControls(
   const [playProgress, setPlayProgress] = useState(0);
   const [playSource, setPlaySource] = useState<InstrumentSource | null>(null);
   const [playError, setPlayError] = useState<string | null>(null);
-  const { instrument, setInstrument } = usePlaybackStore();
+  const { instrument, setInstrument, speed } = usePlaybackStore();
 
   const playbackRef = useRef<PlaybackHandle | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -54,7 +54,7 @@ export function usePlaybackControls(
     const inst: InstrumentId = viewMode ? VIEW_INSTRUMENT[viewMode] : instrument;
     setPlayState('loading');
     try {
-      const handle = await playNotes(playNotes_, () => stopPlayback(), inst);
+      const handle = await playNotes(playNotes_, () => stopPlayback(), inst, speed);
       playbackRef.current = handle;
       setPlaySource(handle.source);
       setPlayState('playing');
