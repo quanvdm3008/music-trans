@@ -13,6 +13,8 @@ const COLUMN_EPSILON = 0.06;
 const MIN_HOLD_SECONDS = 0.08;
 /** Minimum spacing between columns in seconds (= eighth note at 120 BPM) */
 const MIN_COLUMN_SPACING = 0.25;
+/** Drop notes closer than a sixteenth note (0.125s @ 120 BPM) to avoid unplayable clusters on guitar tab. */
+const SIXTEENTH_NOTE_MIN_GAP = 0.125;
 
 // Open-string MIDI pitches, ordered top (highest) → bottom (lowest), like tab.
 const OPEN_PITCHES: Record<TuningId, number[]> = {
@@ -51,9 +53,21 @@ export function generateTab(notes: NoteEventTime[], tuning: TuningId, capo = 0):
   const labels = open.map((m) => midiToNoteName(m).replace(/[0-9-]/g, ''));
 
   const sorted = [...notes].sort((a, b) => a.startTimeSeconds - b.startTimeSeconds);
+
+  // Filter: drop notes closer than a sixteenth note to the last kept note.
+  // This prevents unplayable rapid-note clusters on guitar tab while
+  // continuing to check subsequent notes (not just the immediate neighbor).
+  const filtered: typeof sorted = [];
+  let lastKeptTime = -Infinity;
+  for (const note of sorted) {
+    if (note.startTimeSeconds - lastKeptTime < SIXTEENTH_NOTE_MIN_GAP) continue;
+    filtered.push(note);
+    lastKeptTime = note.startTimeSeconds;
+  }
+
   const columns: TabColumn[] = [];
 
-  for (const note of sorted) {
+  for (const note of filtered) {
     const pos = position(Math.round(note.pitchMidi), open, capo);
     if (!pos) continue;
     const until = note.startTimeSeconds + Math.max(MIN_HOLD_SECONDS, note.durationSeconds);
