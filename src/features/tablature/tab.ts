@@ -48,26 +48,36 @@ function position(midi: number, open: number[], capo: number): { s: number; fret
   return best;
 }
 
-export function generateTab(notes: NoteEventTime[], tuning: TuningId, capo = 0): TabData {
+/**
+ * Filter notes to only those that appear on the guitar/violin tab.
+ * Rules: (1) must be playable on the instrument, (2) on each string,
+ * notes closer than a sixteenth note are skipped (unplayable re-picks).
+ * Returns the surviving notes in their original sorted order.
+ */
+export function filterTabNotes(
+  notes: NoteEventTime[],
+  tuning: TuningId,
+  capo = 0,
+): NoteEventTime[] {
   const open = OPEN_PITCHES[tuning];
-  const labels = open.map((m) => midiToNoteName(m).replace(/[0-9-]/g, ''));
-
   const sorted = [...notes].sort((a, b) => a.startTimeSeconds - b.startTimeSeconds);
-
-  // Filter: drop notes closer than a sixteenth note to the last kept note
-  // **on the same string** — different strings are independent (chords, arpeggios).
-  // This prevents unplayable rapid re-picks on a single string while
-  // continuing to check subsequent notes on that same string.
-  const filtered: typeof sorted = [];
-  const lastKeptByString = new Map<number, number>(); // string index → last kept time
+  const result: NoteEventTime[] = [];
+  const lastKeptByString = new Map<number, number>();
   for (const note of sorted) {
     const pos = position(Math.round(note.pitchMidi), open, capo);
-    if (!pos) continue; // unplayable on this instrument — drop entirely
+    if (!pos) continue;
     const lastTime = lastKeptByString.get(pos.s) ?? -Infinity;
     if (note.startTimeSeconds - lastTime < SIXTEENTH_NOTE_MIN_GAP) continue;
-    filtered.push(note);
+    result.push(note);
     lastKeptByString.set(pos.s, note.startTimeSeconds);
   }
+  return result;
+}
+
+export function generateTab(notes: NoteEventTime[], tuning: TuningId, capo = 0): TabData {
+  const open = OPEN_PITCHES[tuning];
+  const filtered = filterTabNotes(notes, tuning, capo);
+  const labels = open.map((m) => midiToNoteName(m).replace(/[0-9-]/g, ''));
 
   const columns: TabColumn[] = [];
 

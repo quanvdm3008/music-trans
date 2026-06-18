@@ -4,10 +4,25 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { playNotes, type InstrumentSource, type PlaybackHandle } from '../../../core/audio/player';
 import { usePlaybackStore } from '../../../core/stores/playback.store';
 import type { NoteEventTime } from '../../../core/music/note-event';
+import type { ViewMode } from '../../../core/stores/ui.store';
+import type { InstrumentId } from '../../../core/audio/player';
 
 export type PlayState = 'idle' | 'loading' | 'playing';
 
-export function usePlaybackControls(notes: NoteEventTime[] | null) {
+/** Map view mode → instrument for auto-switching. */
+const VIEW_INSTRUMENT: Record<ViewMode, InstrumentId> = {
+  sheet: 'piano',
+  tab: 'guitar',
+  violin: 'violin',
+};
+
+export function usePlaybackControls(
+  notes: NoteEventTime[] | null,
+  /** When set, overrides instrument based on view mode (tab→guitar, etc.). */
+  viewMode?: ViewMode,
+  /** Filtered tab notes — used instead of raw notes when in tab/violin mode. */
+  tabNotes?: NoteEventTime[] | null,
+) {
   const [playState, setPlayState] = useState<PlayState>('idle');
   const [playProgress, setPlayProgress] = useState(0);
   const [playSource, setPlaySource] = useState<InstrumentSource | null>(null);
@@ -33,10 +48,13 @@ export function usePlaybackControls(notes: NoteEventTime[] | null) {
       stopPlayback();
       return;
     }
-    if (!notes || notes.length === 0) return;
+    // Choose notes: tab-filtered notes when in tab/violin mode, raw notes for sheet.
+    const playNotes_ = (viewMode && viewMode !== 'sheet' && tabNotes) ? tabNotes : notes;
+    if (!playNotes_ || playNotes_.length === 0) return;
+    const inst: InstrumentId = viewMode ? VIEW_INSTRUMENT[viewMode] : instrument;
     setPlayState('loading');
     try {
-      const handle = await playNotes(notes, () => stopPlayback(), instrument);
+      const handle = await playNotes(playNotes_, () => stopPlayback(), inst);
       playbackRef.current = handle;
       setPlaySource(handle.source);
       setPlayState('playing');
@@ -54,7 +72,7 @@ export function usePlaybackControls(notes: NoteEventTime[] | null) {
       );
       stopPlayback();
     }
-  }, [playState, notes, stopPlayback, instrument]);
+  }, [playState, notes, tabNotes, viewMode, stopPlayback, instrument]);
 
   useEffect(() => stopPlayback, [stopPlayback]);
 

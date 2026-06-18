@@ -670,8 +670,9 @@ function Footer() {
 /*  MAIN PAGE — integrated with real transcription                    */
 /* ================================================================== */
 export function TranscribePage() {
-  const t = useTranscription();
   const { viewMode, setViewMode } = useUiStore();
+  const { tuning, capo } = useTablatureStore();
+  const t = useTranscription(viewMode, tuning, capo);
   const noteCount = t.notes?.length ?? 0;
   const hasFile = Boolean(t.file);
   const hasResult = Boolean(t.notes && noteCount > 0);
