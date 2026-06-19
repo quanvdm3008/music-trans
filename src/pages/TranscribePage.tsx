@@ -284,9 +284,9 @@ function AiDashboardSection({
         </div>
       )}
 
-      <div className="grid lg:grid-cols-2 gap-6 stagger-children" style={{ alignItems: 'stretch' }}>
+      <div className="grid lg:grid-cols-2 gap-6 stagger-children">
         {/* LEFT COLUMN */}
-        <div className="flex flex-col gap-5" style={{ height: 'fit-content' }}>
+        <div className="flex flex-col gap-5">
           {/* File Info Card */}
           <div className="card-white p-6">
             <h3 className="text-sm font-bold uppercase tracking-wider flex items-center gap-2 mb-4" style={{ color: 'var(--ms-muted)' }}>
@@ -435,7 +435,7 @@ function AiDashboardSection({
         </div>
 
         {/* RIGHT COLUMN: Chord Progression — vertical grid */}
-        <div className="card-white p-5 flex flex-col h-full" style={{ boxShadow: 'var(--ms-shadow-md)', minHeight: '100%' }}>
+        <div className="card-white p-5 flex flex-col" style={{ boxShadow: 'var(--ms-shadow-md)', maxHeight: '520px' }}>
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-sm font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--ms-ink)' }}>
               <span className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: 'var(--ms-gradient)' }}>
@@ -449,7 +449,7 @@ function AiDashboardSection({
             </span>
           </div>
 
-          <div ref={chordListRef} className="flex-1 overflow-y-auto studio-scroll pr-1" style={{ minHeight: '300px' }}>
+          <div ref={chordListRef} className="flex-1 overflow-y-auto studio-scroll pr-1" style={{ minHeight: '200px' }}>
             {!hasResult ? (
               <div className="flex items-center justify-center h-32 text-sm text-center" style={{ color: 'var(--ms-muted-light)' }}>
                 <div><IconCloud className="w-8 h-8 mx-auto mb-2 opacity-20" /><p className="text-xs">Upload & convert to see chords</p></div>
