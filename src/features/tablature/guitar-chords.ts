@@ -116,9 +116,6 @@ function suffixToType(suffix: string): string {
   return '';
 }
 
-const SHARP_KEYS = new Set(['G', 'D', 'A', 'E', 'B', 'F#', 'C#', 'Em', 'Bm', 'F#m', 'C#m', 'G#m', 'D#m']);
-const FLAT_KEYS = new Set(['F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb', 'Dm', 'Gm', 'Cm', 'Fm', 'Bbm', 'Ebm']);
-
 function rootSemitone(root: string): number {
   // Handle flat/double-flat notation
   if (root.endsWith('bb')) return (NOTE_TO_SEMITONE[root.slice(0, -2)] ?? 0) - 2;
@@ -142,7 +139,6 @@ function transposeFingering(f: ChordFingering, fret: number): ChordFingering {
  */
 export function lookupGuitarChord(
   chordName: string,
-  keyRoot?: string,
 ): ChordFingering | null {
   // Parse "Cmaj7" -> root="C", type="maj7"
   const match = chordName.match(/^([A-G](?:#|b)?)(.*)$/);
