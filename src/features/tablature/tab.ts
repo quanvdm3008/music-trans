@@ -17,8 +17,9 @@ const COLUMN_EPSILON = 0.06;
 const MIN_HOLD_SECONDS = 0.08;
 /** Minimum spacing between columns in seconds (= eighth note at 120 BPM) */
 const MIN_COLUMN_SPACING = 0.25;
-/** Drop notes closer than a sixteenth note (0.125s @ 120 BPM) to avoid unplayable clusters on guitar tab. */
-const SIXTEENTH_NOTE_MIN_GAP = 0.125;
+/** Minimal gap to avoid literal duplicate notes on same string.
+ *  Much smaller now so the tab shows nearly all notes the Fretboard displays. */
+const SIXTEENTH_NOTE_MIN_GAP = 0.03;
 
 // Open-string MIDI pitches, ordered top (highest) → bottom (lowest), like tab.
 export const OPEN_PITCHES: Record<TuningId, number[]> = {
@@ -76,17 +77,26 @@ export function filterTabNotes(
   const sorted = [...notes].sort((a, b) => a.startTimeSeconds - b.startTimeSeconds);
   const isViolin = tuning === 'violin';
 
-  // Pass 1: per-string sixteenth-note filter
+  // Pass 1: minimal filter — only drop true duplicates (same string, near-same time).
   const afterStringFilter: NoteEventTime[] = [];
-  const lastKeptByString = new Map<number, number>();
+  const lastTimeByString = new Map<number, number>();
   for (const note of sorted) {
     const positions = allPositions(Math.round(note.pitchMidi), open, capo);
     if (positions.length === 0) continue;
-    const pos = positions[0]; // Use best position for timing check
-    const lastTime = lastKeptByString.get(pos.s) ?? -Infinity;
-    if (note.startTimeSeconds - lastTime < SIXTEENTH_NOTE_MIN_GAP) continue;
+    // Only drop if ALL possible strings have a note too recently.
+    let keep = false;
+    for (const p of positions) {
+      const lastTime = lastTimeByString.get(p.s) ?? -Infinity;
+      if (note.startTimeSeconds - lastTime >= SIXTEENTH_NOTE_MIN_GAP) {
+        keep = true;
+        break;
+      }
+    }
+    if (!keep) continue;
     afterStringFilter.push(note);
-    lastKeptByString.set(pos.s, note.startTimeSeconds);
+    for (const p of positions) {
+      lastTimeByString.set(p.s, note.startTimeSeconds);
+    }
   }
 
   // Pass 2: violin is monophonic — at most one note per COLUMN_EPSILON window.
@@ -271,18 +281,36 @@ export function generateTab(notes: NoteEventTime[], tuning: TuningId, capo = 0):
   let prevFrets: (number | null)[] | undefined;
 
   for (const g of groups) {
-    // Build candidates using all playable positions (not just lowest fret).
+    // Build candidates using all playable positions.
     const cands: ChordCandidate[] = [];
-    const seen = new Set<number>();
-    for (const n of g.notes) {
-      if (seen.has(n.midi)) continue;
-      seen.add(n.midi);
+    // Allow duplicate MIDI in chords — try different strings for each occurrence.
+    const usedStringsByNote = new Map<number, Set<number>>();
+
+    for (let ni = 0; ni < g.notes.length; ni++) {
+      const n = g.notes[ni];
       const positions = allPositions(n.midi, open, capo);
-      if (positions.length) cands.push({ until: n.until, positions });
+      if (positions.length === 0) continue;
+      // For duplicate MIDI within same chord, exclude already-assigned strings from previous
+      // occurrences so each copy lands on a different string when possible.
+      let filteredPositions = positions;
+      const usedForMidi = usedStringsByNote.get(n.midi);
+      if (usedForMidi && usedForMidi.size < positions.length) {
+        const alt = positions.filter(p => !usedForMidi.has(p.s));
+        if (alt.length > 0) filteredPositions = alt;
+      }
+      cands.push({ until: n.until, positions: filteredPositions });
     }
     if (cands.length === 0) continue;
 
-    const assign = voiceChord(cands, prevFrets);
+    // For single notes: use exact same lowest-fret logic as the Fretboard.
+    let assign: Map<number, { s: number; fret: number }>;
+    if (cands.length === 1) {
+      assign = new Map();
+      const p = cands[0].positions[0]; // lowest fret, matches Fretboard.position()
+      assign.set(0, p);
+    } else {
+      assign = voiceChord(cands, prevFrets);
+    }
     if (assign.size === 0) continue;
 
     const frets = new Array<number | null>(open.length).fill(null);
@@ -290,6 +318,13 @@ export function generateTab(notes: NoteEventTime[], tuning: TuningId, capo = 0):
     for (const [idx, p] of assign) {
       frets[p.s] = p.fret;
       untilArr[p.s] = cands[idx].until;
+      // Track used strings for duplicate MIDI handling.
+      const midi = g.notes[idx]?.midi;
+      if (midi != null) {
+        let set = usedStringsByNote.get(midi);
+        if (!set) { set = new Set(); usedStringsByNote.set(midi, set); }
+        set.add(p.s);
+      }
     }
     columns.push({ frets, until: untilArr, time: g.time });
     prevFrets = frets;
