@@ -47,17 +47,18 @@ export async function playNotes(
 
   const sorted = [...notes].sort((a, b) => a.startTimeSeconds - b.startTimeSeconds);
 
-  // Legato: durations now come straight from the engraved score (note values that
-  // already touch the next note), so we only add a tiny release tail to avoid
-  // clicky cut-offs. The tail never bridges a real rest, so the audio stays in
-  // sync with the printed rhythm.
+  // Legato + humanization: piano gets a longer release tail and subtle timing
+  // variation so it breathes like a real performance.
   const LEGATO_TAIL = instrument === 'piano' ? 0.12 : 0.06;
+  // Tiny random jitter emulates a human player's imperfect timing (±4ms).
+  const humanize = () => (Math.random() - 0.5) * 0.008;
   const legato = sorted.map((n, idx) => {
     const ownEnd = n.startTimeSeconds + Math.max(0.08, n.durationSeconds);
     const nextStart = idx + 1 < sorted.length ? sorted[idx + 1].startTimeSeconds : Infinity;
     const gap = nextStart - ownEnd;
     const tail = Math.min(LEGATO_TAIL, Math.max(0.02, gap));
-    return { ...n, durationSeconds: ownEnd + tail - n.startTimeSeconds };
+    const jitter = instrument === 'piano' ? humanize() : 0;
+    return { ...n, durationSeconds: ownEnd + tail - n.startTimeSeconds, startTimeSeconds: n.startTimeSeconds + jitter };
   });
 
   // Apply speed to all timings — slower speed stretches time, faster compresses it.
@@ -98,7 +99,16 @@ export async function playNotes(
     while (i < effective.length && (effective[i].startTimeSeconds / s) <= horizon) {
       const n = effective[i++];
       const dur = Math.max(0.04, n.durationSeconds) / s;
-      const gain = Math.min(0.9, Math.max(0.2, Number.isFinite(n.amplitude) ? n.amplitude : 0.65));
+      // Piano velocity curve: softer range (0.12–0.60) with natural dynamics.
+      // Real pianos are never at max velocity — even ff is ~0.6 in this model.
+      let rawAmp = Number.isFinite(n.amplitude) ? n.amplitude : 0.4;
+      if (instrument === 'piano') {
+        // Soften the curve: loud notes become moderate, quiet notes stay gentle.
+        rawAmp = rawAmp * 0.65 + 0.05; // remap to ~0.05–0.70
+        // Slight random variation (±4%) for natural feel.
+        rawAmp += (Math.random() - 0.5) * 0.04;
+      }
+      const gain = Math.min(0.7, Math.max(0.12, rawAmp));
       inst.play(Math.round(n.pitchMidi), t0 + Math.max(0, n.startTimeSeconds / s), dur, gain);
     }
     if (i >= effective.length) {

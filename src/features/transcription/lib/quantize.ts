@@ -362,11 +362,14 @@ export function scoreToPlaybackNotes(score: QuantizedScore): NoteEventTime[] {
           if (!el.tieStart) {
             const note = pending.get(midi)!;
             const durSeconds = note.durUnits * secondsPerGrid + legatoOverlapSeconds;
+            // Natural piano amplitude: bass notes slightly fuller, treble slightly softer.
+            // Maps MIDI 21–108 to amplitude ~0.35–0.55 for a gentle, realistic curve.
+            const pianoAmp = isPiano ? 0.35 + ((midi - 21) / (108 - 21)) * 0.20 : 0.7;
             result.push({
               pitchMidi: midi,
               startTimeSeconds: note.startUnits * secondsPerGrid,
               durationSeconds: durSeconds,
-              amplitude: 0.7,
+              amplitude: pianoAmp,
             } as NoteEventTime);
             pending.delete(midi);
           }

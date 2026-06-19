@@ -25,10 +25,11 @@ export interface TranscribeOptions {
 }
 
 export const DEFAULT_TRANSCRIBE_OPTIONS: TranscribeOptions = {
-  // Matches the validated Python defaults (basic-pitch predict()).
-  onsetThreshold: 0.5,
-  frameThreshold: 0.3,
-  minNoteLengthFrames: 11, // ~127.7 ms, same as the Python --min-note-ms default
+  // Tighter than Python defaults — cleaner piano transcription with fewer
+  // false-positive harmonics and ghost notes.
+  onsetThreshold: 0.55,
+  frameThreshold: 0.35,
+  minNoteLengthFrames: 15, // ~174 ms — filters out short harmonic blips
 
   minPitchMidi: null,
   maxPitchMidi: null,
@@ -123,7 +124,19 @@ export async function notesFromOutput(
     : mod.noteFramesToTime(polyNotes);
 
   notes.sort((a, b) => a.startTimeSeconds - b.startTimeSeconds || a.pitchMidi - b.pitchMidi);
-  return notes;
+
+  // Post-filter: remove ghost notes that are very short AND very quiet —
+  // these are typically harmonics or room noise, not intentional notes.
+  const MIN_DURATION = 0.06;  // 60ms
+  const MIN_AMPLITUDE = 0.08; // ~pianissimo threshold
+  return notes.filter((n) => {
+    const amp = Number.isFinite((n as any).amplitude) ? (n as any).amplitude : 0.5;
+    // Keep if: long enough OR loud enough (don't filter strong short notes).
+    if (n.durationSeconds >= MIN_DURATION || amp >= MIN_AMPLITUDE * 2) return true;
+    // Drop only if both short AND quiet.
+    if (n.durationSeconds < MIN_DURATION && amp < MIN_AMPLITUDE) return false;
+    return true;
+  });
 }
 
 /** Convenience: run the model and derive notes in one call. */
