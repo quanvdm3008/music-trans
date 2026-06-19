@@ -1,10 +1,12 @@
-// Shared AudioContext + master gain singleton for the playback engine.
+// Shared AudioContext + master chain singleton for the playback engine.
 
-/** Output boost so preview is clearly audible (soundfont samples are quiet). */
-const MASTER_GAIN = 3;
+/** Output boost so preview is clearly audible (soundfont samples are quiet).
+ *  Reduced from 3 to avoid clipping when many notes play simultaneously. */
+const MASTER_GAIN = 1.8;
 
 let audioCtx: AudioContext | null = null;
 let masterGain: GainNode | null = null;
+let masterCompressor: DynamicsCompressorNode | null = null;
 
 export function getCtx(): AudioContext {
   if (!audioCtx) {
@@ -16,13 +18,23 @@ export function getCtx(): AudioContext {
   return audioCtx;
 }
 
-/** A shared master gain node feeding the speakers. */
-export function getMaster(): GainNode {
+/** A shared master chain: gain → compressor → speakers. */
+export function getMaster(): AudioNode {
   const ac = getCtx();
   if (!masterGain) {
+    // Compressor soft-limits peaks, prevents clipping on dense chords.
+    masterCompressor = ac.createDynamicsCompressor();
+    masterCompressor.threshold.value = -6;
+    masterCompressor.knee.value = 12;
+    masterCompressor.ratio.value = 4;
+    masterCompressor.attack.value = 0.005;
+    masterCompressor.release.value = 0.15;
+
     masterGain = ac.createGain();
     masterGain.gain.value = MASTER_GAIN;
-    masterGain.connect(ac.destination);
+
+    masterGain.connect(masterCompressor);
+    masterCompressor.connect(ac.destination);
   }
   return masterGain;
 }

@@ -80,23 +80,33 @@ export async function playNotes(
     total = Math.max(total, (n.startTimeSeconds + Math.max(0.08, n.durationSeconds)) / s);
   }
 
-  // Lookahead scheduler.
-  const t0 = ac.currentTime + 0.25;
-  const SCHEDULE_AHEAD = 1.5;
-  const TICK_MS = 25;
+  // Lookahead scheduler — adaptive setTimeout for tighter Web Audio timing.
+  const t0 = ac.currentTime + 0.2;
+  const SCHEDULE_AHEAD = 1.2;
+  const TICK_MIN_MS = 10;
   let i = 0;
+  let schedulerTimer: number | null = null;
+  let stopped = false;
+
   const scheduleDue = () => {
+    if (stopped) return;
     const horizon = (ac.currentTime - t0) + SCHEDULE_AHEAD;
     while (i < effective.length && (effective[i].startTimeSeconds / s) <= horizon) {
       const n = effective[i++];
-      const duration = Math.max(0.08, n.durationSeconds) / s;
-      const gain = Math.min(1, Math.max(0.25, Number.isFinite(n.amplitude) ? n.amplitude : 0.7));
-      inst.play(Math.round(n.pitchMidi), t0 + Math.max(0, n.startTimeSeconds / s), duration, gain);
+      const dur = Math.max(0.04, n.durationSeconds) / s;
+      const gain = Math.min(0.9, Math.max(0.2, Number.isFinite(n.amplitude) ? n.amplitude : 0.65));
+      inst.play(Math.round(n.pitchMidi), t0 + Math.max(0, n.startTimeSeconds / s), dur, gain);
     }
-    if (i >= effective.length) window.clearInterval(schedulerId);
+    if (i >= effective.length) {
+      schedulerTimer = null;
+      return;
+    }
+    // Adaptive delay: schedule sooner if next note is close.
+    const nextDue = (effective[i].startTimeSeconds / s) - (ac.currentTime - t0);
+    const delay = Math.max(TICK_MIN_MS, Math.min(80, (nextDue - SCHEDULE_AHEAD * 0.5) * 1000));
+    schedulerTimer = window.setTimeout(scheduleDue, delay);
   };
   scheduleDue();
-  const schedulerId = window.setInterval(scheduleDue, TICK_MS);
 
   const endTimer = window.setTimeout(onEnd, (total + 0.6) * 1000);
 
@@ -105,7 +115,8 @@ export async function playNotes(
     source: inst.source,
     currentTime: () => offset + Math.max(0, (ac.currentTime - t0)),
     stop: () => {
-      window.clearInterval(schedulerId);
+      stopped = true;
+      if (schedulerTimer != null) window.clearTimeout(schedulerTimer);
       window.clearTimeout(endTimer);
       try {
         inst.stop();

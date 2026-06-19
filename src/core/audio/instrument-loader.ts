@@ -12,7 +12,9 @@ function wrapSoundfont(sf: SoundfontInstrument, source: InstrumentSource): Instr
   return {
     source,
     play: (midi, when, duration, gain) => {
-      sf.play(midi, when, { duration, gain });
+      // Cap per-note gain to prevent clipping from velocity spikes.
+      const safeGain = Math.min(0.85, Math.max(0.15, gain));
+      sf.play(midi, when, { duration, gain: safeGain });
     },
     stop: () => sf.stop(),
   };
