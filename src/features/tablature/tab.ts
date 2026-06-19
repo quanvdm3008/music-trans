@@ -28,6 +28,17 @@ export const OPEN_PITCHES: Record<TuningId, number[]> = {
   violin: [76, 69, 62, 55],           // E A D G
 };
 
+/** Guitar articulation techniques. */
+export type GuitarTechnique = 'hammer-on' | 'pull-off' | 'slide-up' | 'slide-down';
+
+export interface TabTechnique {
+  type: GuitarTechnique;
+  /** String index (0 = high e). */
+  string: number;
+  /** Index of the target column this technique connects FROM. */
+  fromCol: number;
+}
+
 export interface TabColumn {
   /** Fret per string (index 0 = high e), or null if the string is unplayed. */
   frets: (number | null)[];
@@ -35,6 +46,8 @@ export interface TabColumn {
   until: (number | null)[];
   /** Start time of this column (seconds) — also its real position on the timeline. */
   time: number;
+  /** Techniques that apply TO this column (e.g. pull-off from previous note). */
+  techniques?: TabTechnique[];
 }
 
 export interface TabData {
@@ -350,7 +363,36 @@ export function generateTab(notes: NoteEventTime[], tuning: TuningId, capo = 0):
     }
   }
 
-  // Post-process: enforce minimum spacing (= eighth note) so notes never overlap
+  // Post-process 1: detect guitar techniques between consecutive notes on same string.
+  const LEGATO_GAP = 0.06; // max gap (s) to consider hammer-on / pull-off
+  for (let i = 1; i < columns.length; i++) {
+    const prev = columns[i - 1];
+    const cur = columns[i];
+
+    for (let s = 0; s < open.length; s++) {
+      const prevFret = prev.frets[s];
+      const curFret = cur.frets[s];
+      if (prevFret == null || curFret == null) continue;
+      if (prevFret === curFret) continue;
+
+      const prevUntil = prev.until[s] ?? prev.time;
+      const timeBetween = cur.time - prevUntil;
+
+      if (prevUntil > cur.time) {
+        // Overlap: slide
+        const tech: GuitarTechnique = curFret > prevFret ? 'slide-up' : 'slide-down';
+        cur.techniques = cur.techniques ?? [];
+        cur.techniques.push({ type: tech, string: s, fromCol: i - 1 });
+      } else if (timeBetween <= LEGATO_GAP && timeBetween >= 0) {
+        // Tiny gap: hammer-on or pull-off
+        const tech: GuitarTechnique = curFret > prevFret ? 'hammer-on' : 'pull-off';
+        cur.techniques = cur.techniques ?? [];
+        cur.techniques.push({ type: tech, string: s, fromCol: i - 1 });
+      }
+    }
+  }
+
+  // Post-process 2: enforce minimum spacing so notes never overlap visually.
   for (let i = 1; i < columns.length; i++) {
     const gap = columns[i].time - columns[i - 1].time;
     if (gap < MIN_COLUMN_SPACING) {

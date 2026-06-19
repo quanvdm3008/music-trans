@@ -220,7 +220,8 @@ export function TabView({ notes, isPlaying, getTime, chords: externalChords, bar
         }
 
         // Notes — only for this row
-        for (const col of tab.columns) {
+        for (let ci = 0; ci < tab.columns.length; ci++) {
+          const col = tab.columns[ci];
           const colRow = Math.floor(col.time / secondsPerRow);
           if (colRow !== realRow) continue;
           const x = PAD_L + (col.time - rowStartTime) * pps;
@@ -264,6 +265,68 @@ export function TabView({ notes, isPlaying, getTime, chords: externalChords, bar
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText(String(fret), x, y + 0.5);
+          }
+        }
+
+        // Guitar techniques: hammer-on / pull-off slur, slide line.
+        for (let ci = 0; ci < tab.columns.length; ci++) {
+          const col = tab.columns[ci];
+          if (!col.techniques || col.techniques.length === 0) continue;
+          const colRow = Math.floor(col.time / secondsPerRow);
+          if (colRow !== realRow) continue;
+
+          const xCur = PAD_L + (col.time - rowStartTime) * pps;
+          for (const tech of col.techniques) {
+            if (tech.fromCol < 0 || tech.fromCol >= tab.columns.length) continue;
+            const fromCol = tab.columns[tech.fromCol];
+            const fromRow = Math.floor(fromCol.time / secondsPerRow);
+            if (fromRow !== realRow) continue; // both must be on same row
+
+            const xPrev = PAD_L + (fromCol.time - rowStartTime) * pps;
+            const s = tech.string;
+            const y = stringY(displayRow, s, nStrings);
+            const prevFret = fromCol.frets[s];
+            const curFret = col.frets[s];
+            if (prevFret == null || curFret == null) continue;
+
+            if (tech.type === 'hammer-on' || tech.type === 'pull-off') {
+              // Draw a slur arc above the string between the two notes.
+              const midX = (xPrev + xCur) / 2;
+              const slurY = y - NOTE_R - 8; // above the note
+              const dx = xCur - xPrev;
+              const cpY = slurY - Math.max(6, Math.abs(dx) * 0.35); // arc height
+
+              ctx.strokeStyle = '#6366F1';
+              ctx.lineWidth = 1.8;
+              ctx.beginPath();
+              ctx.moveTo(xPrev, slurY);
+              ctx.quadraticCurveTo(midX, cpY, xCur, slurY);
+              ctx.stroke();
+
+              // Label: H or P
+              ctx.fillStyle = '#6366F1';
+              ctx.font = 'italic 8px "Plus Jakarta Sans", system-ui, sans-serif';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'bottom';
+              ctx.fillText(tech.type === 'hammer-on' ? 'H' : 'P', midX, cpY - 2);
+            } else {
+              // Slide: diagonal line between the two notes + "s" label.
+              ctx.strokeStyle = '#8B5CF6';
+              ctx.lineWidth = 1.4;
+              ctx.setLineDash([3, 2]);
+              ctx.beginPath();
+              ctx.moveTo(xPrev + NOTE_R, y);
+              ctx.lineTo(xCur - NOTE_R, y);
+              ctx.stroke();
+              ctx.setLineDash([]);
+
+              // Small diagonal or "s" label
+              ctx.fillStyle = '#8B5CF6';
+              ctx.font = 'italic 8px "Plus Jakarta Sans", system-ui, sans-serif';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'bottom';
+              ctx.fillText('s', (xPrev + xCur) / 2, y - NOTE_R - 2);
+            }
           }
         }
       }
