@@ -68,6 +68,51 @@ function lowestFretPosition(midi: number, open: number[], capo: number): { s: nu
   return best;
 }
 
+/**
+ * Best position for a note considering the previous hand position.
+ * Prefers positions close to where the hand already is, so transitions
+ * are smooth rather than forcing the hand to jump across the neck.
+ * If the previous hand was high on the neck (e.g. around fret 12 for a
+ * melody on the high E string), this will prefer playing the current note
+ * on a lower string at a higher fret, keeping the hand in the same region.
+ */
+function bestPositionNearHand(
+  midi: number,
+  open: number[],
+  capo: number,
+  prevFrets: (number | null)[] | undefined,
+): { s: number; fret: number } | null {
+  const positions = allPositions(midi, open, capo);
+  if (positions.length === 0) return null;
+
+  // If no previous hand position, use the lowest fret (default).
+  if (!prevFrets) return positions[0];
+
+  const prevFretted = prevFrets.filter((f): f is number => f !== null && f > 0);
+  if (prevFretted.length === 0) return positions[0];
+
+  // Compute the previous hand's "center of mass" (average fret).
+  const prevAvg = prevFretted.reduce((s, f) => s + f, 0) / prevFretted.length;
+
+  // Score each position: prefer close to prevAvg, but also prefer lower frets.
+  // A position far from the previous hand position gets a penalty.
+  let best: { s: number; fret: number; score: number } | null = null;
+  for (const p of positions) {
+    const distFromHand = Math.abs(p.fret - prevAvg);
+    // Prefer positions within 3 frets of the hand; penalize jumps > 5.
+    const handScore = distFromHand <= 3 ? 10 - distFromHand * 2
+      : distFromHand <= 5 ? 5 - distFromHand
+      : -(distFromHand - 5) * 2;
+    // Slight preference for lower frets (easier to play).
+    const fretScore = Math.max(0, 6 - p.fret) * 0.5;
+    // Slight preference for higher strings (melody clarity).
+    const stringBonus = (open.length - 1 - p.s) * 0.3;
+    const score = handScore + fretScore + stringBonus;
+    if (!best || score > best.score) best = { ...p, score };
+  }
+  return best ? { s: best.s, fret: best.fret } : positions[0];
+}
+
 /** All playable positions for a pitch, sorted by preference: open strings first, then lowest fret. */
 function allPositions(midi: number, open: number[], capo: number): { s: number; fret: number }[] {
   const result: { s: number; fret: number }[] = [];
@@ -312,8 +357,8 @@ export function generateTab(notes: NoteEventTime[], tuning: TuningId, capo = 0):
     const untilArr = new Array<number | null>(open.length).fill(null);
 
     if (g.notes.length === 1) {
-      // Single note → use lowest-fret position, exactly like Fretboard.
-      const pos = lowestFretPosition(g.notes[0].midi, open, capo);
+      // Single note → use best position near previous hand (smooth transitions).
+      const pos = bestPositionNearHand(g.notes[0].midi, open, capo, prevFrets);
       if (pos) {
         frets[pos.s] = pos.fret;
         untilArr[pos.s] = g.notes[0].until;
@@ -388,6 +433,53 @@ export function generateTab(notes: NoteEventTime[], tuning: TuningId, capo = 0):
         const tech: GuitarTechnique = curFret > prevFret ? 'hammer-on' : 'pull-off';
         cur.techniques = cur.techniques ?? [];
         cur.techniques.push({ type: tech, string: s, fromCol: i - 1 });
+      }
+    }
+  }
+
+  // Post-process 1.5: reposition bass notes to stay near the melody hand position.
+  // When a high melody note forces a high fret on a high string, bass notes on
+  // low strings should shift to higher frets (or higher strings) to keep the
+  // whole hand in one comfortable region instead of stretching impossibly.
+  for (let i = 0; i < columns.length; i++) {
+    const col = columns[i];
+    const fretted = col.frets
+      .map((f, s) => (f != null && f > 0 ? { s, fret: f } : null))
+      .filter((x): x is { s: number; fret: number } => x != null);
+
+    if (fretted.length < 2) continue;
+
+    // Find the highest-fretted note (typically melody on high strings).
+    const highest = fretted.reduce((a, b) => (b.fret > a.fret ? b : a), fretted[0]);
+    const lowest = fretted.reduce((a, b) => (b.fret < a.fret ? b : a), fretted[0]);
+
+    // If melody is far from bass, try to bring bass closer.
+    const fretSpan = highest.fret - lowest.fret;
+    if (fretSpan <= FRET_WINDOW) continue;
+
+    // Try to move low bass notes to higher frets on adjacent strings.
+    // Only reposition notes on the lowest 2 strings.
+    for (const note of fretted) {
+      if (note.s < open.length - 2) continue; // only bass strings (lowest 2)
+      if (note.fret >= highest.fret - FRET_WINDOW) continue; // already close enough
+
+      // Find the MIDI pitch of this note on its current (string, fret).
+      const midi = open[note.s] + capo + note.fret;
+      // Try to play it on a higher string (toward melody) at a higher fret.
+      for (let tryS = note.s - 1; tryS >= 0; tryS--) {
+        const tryFret = midi - (open[tryS] + capo);
+        if (tryFret < 1 || tryFret > FRET_COUNT) continue;
+        if (col.frets[tryS] != null) continue; // string already occupied
+        // Only accept if it brings the note within FRET_WINDOW of the melody.
+        if (tryFret < highest.fret - FRET_WINDOW) continue;
+        if (tryFret > highest.fret) continue;
+
+        // Reposition: move note from lower string to higher string.
+        col.frets[note.s] = null;
+        col.until[note.s] = null;
+        col.frets[tryS] = tryFret;
+        col.until[tryS] = col.until[note.s] ?? col.time + 0.5;
+        break;
       }
     }
   }
