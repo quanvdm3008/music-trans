@@ -103,12 +103,13 @@ export async function playNotes(
       // Real pianos are never at max velocity — even ff is ~0.6 in this model.
       let rawAmp = Number.isFinite(n.amplitude) ? n.amplitude : 0.4;
       if (instrument === 'piano') {
-        // Soften the curve: loud notes become moderate, quiet notes stay gentle.
-        rawAmp = rawAmp * 0.65 + 0.05; // remap to ~0.05–0.70
-        // Slight random variation (±4%) for natural feel.
-        rawAmp += (Math.random() - 0.5) * 0.04;
+        // Fuller curve: preserve more of the original dynamics.
+        // Maps 0..1 → ~0.10–0.72 for a warm, resonant piano tone.
+        rawAmp = rawAmp * 0.72 + 0.10;
+        // Slight random variation (±3%) for natural feel.
+        rawAmp += (Math.random() - 0.5) * 0.03;
       }
-      const gain = Math.min(0.7, Math.max(0.12, rawAmp));
+      const gain = Math.min(0.75, Math.max(0.10, rawAmp));
       inst.play(Math.round(n.pitchMidi), t0 + Math.max(0, n.startTimeSeconds / s), dur, gain);
     }
     if (i >= effective.length) {

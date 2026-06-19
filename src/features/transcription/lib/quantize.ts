@@ -166,11 +166,14 @@ export function quantizeScore(notes: NoteEventTime[], settings: ScoreSettings): 
   } else {
     // Piano: adaptive two-hand assignment with cross-staff redistribution.
     const { treble, bass } = assignPianoHands(quantized, settings.splitMidi);
+    // Build a unified onset timeline from BOTH staves so treble & bass share
+    // the same rhythmic grid. Prevents the two hands from drifting apart.
+    const allOnsets = [...new Set([...treble, ...bass].map((n) => n.start))].sort((a, b) => a - b);
     staves = [
       {
         clef: 'treble',
         measures: spansToMeasures(
-          buildSpans(treble, totalUnits),
+          buildSpans(treble, totalUnits, allOnsets),
           divisionsPerMeasure,
           numberOfMeasures,
           table,
@@ -179,7 +182,7 @@ export function quantizeScore(notes: NoteEventTime[], settings: ScoreSettings): 
       {
         clef: 'bass',
         measures: spansToMeasures(
-          buildSpans(bass, totalUnits),
+          buildSpans(bass, totalUnits, allOnsets),
           divisionsPerMeasure,
           numberOfMeasures,
           table,
@@ -209,8 +212,20 @@ function assignPianoHands(
   const activeSplit = findBestSplit(quantized, splitMidi);
 
   // Step 2: initial assignment.
-  const trebleNotes = quantized.filter((n) => n.midi >= activeSplit);
-  const bassNotes = quantized.filter((n) => n.midi < activeSplit);
+  let trebleNotes = quantized.filter((n) => n.midi >= activeSplit);
+  let bassNotes = quantized.filter((n) => n.midi < activeSplit);
+
+  // Step 2b: balance check — if either hand gets <15% of notes, the split
+  // drifted too far. Fall back to the default split for a balanced result.
+  const totalNotes = quantized.length;
+  if (totalNotes > 8) {
+    const trebleRatio = trebleNotes.length / totalNotes;
+    const bassRatio = bassNotes.length / totalNotes;
+    if (trebleRatio < 0.15 || bassRatio < 0.15) {
+      trebleNotes = quantized.filter((n) => n.midi >= splitMidi);
+      bassNotes = quantized.filter((n) => n.midi < splitMidi);
+    }
+  }
 
   // Step 3: cap each hand independently.
   const trebleResult = capHandSpan(trebleNotes, 'top', MAX_HAND_SPAN);
@@ -278,11 +293,11 @@ function findBestSplit(
     hist.set(m, (hist.get(m) ?? 0) + 1);
   }
 
-  const range = 12; // search ±1 octave around default
+  const maxDrift = 6; // max ±6 semitones from default — keeps hands balanced
   let bestSplit = defaultSplit;
   let bestGap = -Infinity;
 
-  for (let split = defaultSplit - range; split <= defaultSplit + range; split++) {
+  for (let split = defaultSplit - maxDrift; split <= defaultSplit + maxDrift; split++) {
     // "Gap" = how few notes exist in a 4-semitone window centered at the split.
     // A large gap means the split naturally separates two clusters.
     let nearbyNotes = 0;
@@ -362,9 +377,9 @@ export function scoreToPlaybackNotes(score: QuantizedScore): NoteEventTime[] {
           if (!el.tieStart) {
             const note = pending.get(midi)!;
             const durSeconds = note.durUnits * secondsPerGrid + legatoOverlapSeconds;
-            // Natural piano amplitude: bass notes slightly fuller, treble slightly softer.
-            // Maps MIDI 21–108 to amplitude ~0.35–0.55 for a gentle, realistic curve.
-            const pianoAmp = isPiano ? 0.35 + ((midi - 21) / (108 - 21)) * 0.20 : 0.7;
+            // Natural piano amplitude: warmer, fuller range with bass emphasis.
+            // Maps MIDI 21–108 to amplitude ~0.42–0.60 — rich, warm, not harsh.
+            const pianoAmp = isPiano ? 0.42 + ((midi - 21) / (108 - 21)) * 0.18 : 0.7;
             result.push({
               pitchMidi: midi,
               startTimeSeconds: note.startUnits * secondsPerGrid,

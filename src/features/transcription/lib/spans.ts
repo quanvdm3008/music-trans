@@ -15,10 +15,17 @@ export function secondsToUnits(seconds: number, secondsPerGrid: number): number 
   return Math.round(seconds / secondsPerGrid);
 }
 
-/** Group same-onset notes on a staff into chords and fill gaps with rests. */
+/** Group same-onset notes on a staff into chords and fill gaps with rests.
+ *
+ * When `globalOnsets` is provided (piano mode — all onsets from BOTH staves),
+ * note durations are capped using the unified timeline so the treble and bass
+ * staves share the same rhythmic grid. Without it, each staff truncates notes
+ * independently, causing the two hands to drift out of sync.
+ */
 export function buildSpans(
   staffNotes: { start: number; dur: number; midi: number }[],
   totalUnits: number,
+  globalOnsets?: number[],
 ): RawSpan[] {
   if (staffNotes.length === 0) {
     return totalUnits > 0 ? [{ start: 0, dur: totalUnits, isRest: true, midis: [] }] : [];
@@ -41,7 +48,13 @@ export function buildSpans(
     if (start > pos) {
       spans.push({ start: pos, dur: start - pos, isRest: true, midis: [] });
     }
-    const nextOnset = i + 1 < onsets.length ? onsets[i + 1] : totalUnits;
+    // Use global timeline if provided (piano mode) so both hands share rhythm.
+    const refOnsets = globalOnsets ?? onsets;
+    // Find the next onset in the unified timeline (not just this staff's).
+    let nextOnset = totalUnits;
+    for (const ro of refOnsets) {
+      if (ro > start) { nextOnset = ro; break; }
+    }
     const maxDur = Math.max(1, nextOnset - start);
     const dur = Math.min(Math.max(1, group.dur), maxDur);
     spans.push({
