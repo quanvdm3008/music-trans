@@ -45,6 +45,8 @@ export function usePlaybackControls(
   }, []);
 
   const getPlaybackTime = useCallback(() => playbackRef.current?.currentTime() ?? null, []);
+  /** Music time (matches note.startTimeSeconds) for visualization sync at any speed. */
+  const getPlaybackMusicTime = useCallback(() => playbackRef.current?.currentMusicTime() ?? null, []);
 
   /** Core play logic — reused by toggle, seek, and instrument-switch restart. */
   const startPlayback = useCallback(async (fromSeconds = 0) => {
@@ -123,6 +125,7 @@ export function usePlaybackControls(
     instrument,
     setInstrument,
     getPlaybackTime,
+    getPlaybackMusicTime,
     handlePlayToggle,
     stopPlayback,
     seekTo,

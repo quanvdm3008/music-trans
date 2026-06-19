@@ -513,13 +513,16 @@ function AiDashboardSection({
 /*  4. ENHANCED SHEET MUSIC + GUITAR TAB PREVIEWER                     */
 /* ================================================================== */
 function SheetMusicPreviewerSection({
-  svgPages, rendering, notes, playbackNotes, isPlaying, viewMode, setViewMode,
-  onPlayToggle, getTime, musicXml, midiBytes, fileName, barChords, barDuration,
+  svgPages, rendering, notes, playbackNotes, tabNotes, isPlaying, viewMode, setViewMode,
+  onPlayToggle, getTime, getMusicTime, musicXml, midiBytes, fileName, barChords, barDuration,
 }: {
   svgPages: string[] | null; rendering: boolean; notes: { pitchMidi: number; startTimeSeconds: number; durationSeconds: number }[] | null;
   playbackNotes: { pitchMidi: number; startTimeSeconds: number; durationSeconds: number }[] | null;
+  tabNotes: { pitchMidi: number; startTimeSeconds: number; durationSeconds: number }[] | null;
   isPlaying: boolean; playProgress: number; viewMode: ViewMode; setViewMode: (m: ViewMode) => void;
-  onPlayToggle: () => void; getTime: () => number | null; musicXml: string | null;
+  onPlayToggle: () => void; getTime: () => number | null;
+  getMusicTime: () => number | null;
+  musicXml: string | null;
   midiBytes: Uint8Array | null; fileName: string;
   barChords: ReturnType<typeof detectChordsFromNotes> | null;
   barDuration: number;
@@ -533,6 +536,8 @@ function SheetMusicPreviewerSection({
   const tuningLabel = isViolin ? 'G D A E' : (tuning === 'dropD' ? 'D A D G B e' : 'E A D G B e');
   // Piano-roll reads the sheet-derived notes so the keys that light up match the staff + audio.
   const pianoNotes = playbackNotes ?? notes;
+  // Tab/Fretboard read filtered tab notes so what you see matches what you hear.
+  const fretNotes = tabNotes ?? notes;
   const pitchRange = getPitchRange((pianoNotes as any) ?? null);
 
   const downloadMidi = () => { if (midiBytes) downloadFile(midiBytes, `${fileName || 'output'}.mid`, 'audio/midi'); };
@@ -649,7 +654,7 @@ function SheetMusicPreviewerSection({
                     lowMidi={pitchRange.low}
                     highMidi={pitchRange.high}
                     isPlaying={isPlaying}
-                    getTime={getTime}
+                    getTime={getMusicTime}
                   />
                 </div>
               </div>
@@ -684,9 +689,9 @@ function SheetMusicPreviewerSection({
                     <Fretboard
                       tuning={isViolin ? 'violin' : tuning}
                       capo={capo}
-                      notes={(notes as any) ?? []}
+                      notes={(fretNotes as any) ?? []}
                       isPlaying={isPlaying}
-                      getTime={getTime}
+                      getTime={getMusicTime}
                     />
                   </div>
                 </div>
@@ -704,7 +709,7 @@ function SheetMusicPreviewerSection({
                       {tuningLabel} · chords at top with vertical markers
                     </span>
                   </div>
-                  <TabView notes={(notes as any) ?? []} isPlaying={isPlaying} getTime={getTime} chords={barChords ?? undefined} barDuration={barDuration} />
+                  <TabView notes={(fretNotes as any) ?? []} isPlaying={isPlaying} getTime={getMusicTime} chords={barChords ?? undefined} barDuration={barDuration} />
                 </div>
               </div>
             </div>
@@ -817,7 +822,7 @@ export function TranscribePage() {
           instrument={t.instrument}
           onInstrument={(id) => t.setInstrument?.(id as any)}
           isPlaying={t.playState === 'playing'}
-          getTime={t.getPlaybackTime}
+          getTime={t.getMusicTime}
         />
       )}
 
@@ -827,12 +832,14 @@ export function TranscribePage() {
           rendering={t.rendering}
           notes={t.notes as any}
           playbackNotes={t.sheetNotes as any}
+          tabNotes={t.tabNotes as any}
           isPlaying={t.playState === 'playing'}
           playProgress={t.playProgress}
           viewMode={viewMode}
           setViewMode={setViewMode}
           onPlayToggle={t.handlePlayToggle}
           getTime={t.getPlaybackTime}
+          getMusicTime={t.getMusicTime}
           musicXml={t.musicXml}
           midiBytes={t.midiBytes}
           fileName={t.title || t.file?.name || 'output'}

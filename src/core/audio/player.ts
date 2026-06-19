@@ -18,8 +18,10 @@ export interface PlaybackHandle {
   totalSeconds: number;
   /** Which engine ended up playing. */
   source: InstrumentSource;
-  /** Current playback position in seconds, read from the AUDIO clock. */
+  /** Current playback position in REAL seconds (for progress bar). */
   currentTime: () => number;
+  /** Current playback position in MUSIC time (= real × speed, matches note.startTimeSeconds). */
+  currentMusicTime: () => number;
   /** Stop immediately and cancel the end callback. */
   stop: () => void;
 }
@@ -49,7 +51,7 @@ export async function playNotes(
   // already touch the next note), so we only add a tiny release tail to avoid
   // clicky cut-offs. The tail never bridges a real rest, so the audio stays in
   // sync with the printed rhythm.
-  const LEGATO_TAIL = 0.06;
+  const LEGATO_TAIL = instrument === 'piano' ? 0.12 : 0.06;
   const legato = sorted.map((n, idx) => {
     const ownEnd = n.startTimeSeconds + Math.max(0.08, n.durationSeconds);
     const nextStart = idx + 1 < sorted.length ? sorted[idx + 1].startTimeSeconds : Infinity;
@@ -124,7 +126,11 @@ export async function playNotes(
   return {
     totalSeconds: fullTotal, // always report full length for progress bar
     source: inst.source,
+    // currentTime returns REAL elapsed seconds (for progress bar).
+    // Visualization should multiply by speed to get music time matching note.startTimeSeconds.
     currentTime: () => offset + Math.max(0, (ac.currentTime - t0)),
+    /** Music time: real elapsed × speed = matches note.startTimeSeconds for viz sync. */
+    currentMusicTime: () => (offset + Math.max(0, (ac.currentTime - t0))) * s,
     stop: () => {
       stopped = true;
       if (rafId != null) cancelAnimationFrame(rafId);

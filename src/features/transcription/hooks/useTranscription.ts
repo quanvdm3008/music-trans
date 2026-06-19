@@ -66,6 +66,7 @@ export function useTranscription(
     pitchRange: getPitchRange(source.notes),
     sheetNotes,
     tabNotes,
+    getMusicTime: playback.getPlaybackMusicTime,
     handleConvert,
     loadFromUrl,
     handleRetranscribe,
