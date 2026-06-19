@@ -225,7 +225,18 @@ function AiDashboardSection({
     if (activeChordIdx == null) return;
     const container = chordListRef.current;
     const row = container?.querySelector<HTMLElement>(`[data-chord-idx="${activeChordIdx}"]`);
-    row?.scrollIntoView({ block: 'nearest' });
+    if (container && row) {
+      // Only scroll the container itself — never affect the page scroll position.
+      const containerTop = container.scrollTop;
+      const containerBottom = containerTop + container.clientHeight;
+      const rowTop = row.offsetTop - container.offsetTop;
+      const rowBottom = rowTop + row.offsetHeight;
+      if (rowTop < containerTop) {
+        container.scrollTop = rowTop - 8;
+      } else if (rowBottom > containerBottom) {
+        container.scrollTop = rowBottom - container.clientHeight + 8;
+      }
+    }
   }, [activeChordIdx]);
 
   return (
