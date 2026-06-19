@@ -90,6 +90,9 @@ const BEAM_LEVELS: Record<string, number> = {
   '64th': 4,
 };
 
+/** Max notes per beam group (standard notation: 4 eighths in 4/4). */
+const MAX_BEAM_GROUP = 4;
+
 /** Which MusicXML beam element to emit for a note's position in a group. */
 type BeamRole = 'begin' | 'continue' | 'end';
 
@@ -112,7 +115,7 @@ function appendStaffMeasure(
   const elements = staff.measures[measureIndex] ?? [];
   if (elements.length === 0) return;
 
-  // Pre-compute beam groups for consecutive beamed notes.
+  // Pre-compute beam groups for consecutive beamed notes (max 4 per group).
   // Groups can mix different beamed types (eighth + 16th) — the shortest
   // note determines the beam count for the whole group.
   const beamInfo: (BeamRole | null)[] = new Array(elements.length).fill(null);
@@ -133,13 +136,17 @@ function appendStaffMeasure(
       maxLevels = Math.max(maxLevels, nextLevels);
       j++;
     }
-    const count = j - i;
-    if (count >= 2) {
-      for (let k = 0; k < count; k++) {
-        if (k === 0) beamInfo[i + k] = 'begin';
-        else if (k === count - 1) beamInfo[i + k] = 'end';
-        else beamInfo[i + k] = 'continue';
-        beamGroupLevels[i + k] = maxLevels;
+    // Split into sub-groups of max MAX_BEAM_GROUP notes each.
+    for (let gStart = i; gStart < j; gStart += MAX_BEAM_GROUP) {
+      const gEnd = Math.min(gStart + MAX_BEAM_GROUP, j);
+      const count = gEnd - gStart;
+      if (count >= 2) {
+        for (let k = 0; k < count; k++) {
+          if (k === 0) beamInfo[gStart + k] = 'begin';
+          else if (k === count - 1) beamInfo[gStart + k] = 'end';
+          else beamInfo[gStart + k] = 'continue';
+          beamGroupLevels[gStart + k] = maxLevels;
+        }
       }
     }
     i = j;
