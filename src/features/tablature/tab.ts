@@ -43,6 +43,18 @@ export interface TabData {
   columns: TabColumn[];
 }
 
+/** Lowest-fret position for a pitch (same algorithm as Fretboard component). */
+function lowestFretPosition(midi: number, open: number[], capo: number): { s: number; fret: number } | null {
+  let best: { s: number; fret: number } | null = null;
+  for (let s = 0; s < open.length; s++) {
+    const fret = midi - (open[s] + capo);
+    if (fret >= 0 && fret <= FRET_COUNT && (!best || fret < best.fret)) {
+      best = { s, fret };
+    }
+  }
+  return best;
+}
+
 /** All playable positions for a pitch, sorted by preference: open strings first, then lowest fret. */
 function allPositions(midi: number, open: number[], capo: number): { s: number; fret: number }[] {
   const result: { s: number; fret: number }[] = [];
@@ -261,13 +273,15 @@ function voiceChord(
 
 export function generateTab(notes: NoteEventTime[], tuning: TuningId, capo = 0): TabData {
   const open = OPEN_PITCHES[tuning];
-  const filtered = filterTabNotes(notes, tuning, capo);
+  // Use RAW notes — same set the Fretboard sees (no filterTabNotes).
+  const sorted = [...notes].sort((a, b) => a.startTimeSeconds - b.startTimeSeconds);
   const labels = open.map((m) => midiToNoteName(m).replace(/[0-9-]/g, ''));
 
   // Group near-simultaneous notes into chords (one timeline column each).
   const groups: { time: number; notes: { midi: number; until: number }[] }[] = [];
-  for (const note of filtered) {
+  for (const note of sorted) {
     const midi = Math.round(note.pitchMidi);
+    if (midi < 0 || midi > 127) continue;
     const until = note.startTimeSeconds + Math.max(MIN_HOLD_SECONDS, note.durationSeconds);
     const last = groups[groups.length - 1];
     if (last && Math.abs(note.startTimeSeconds - last.time) <= COLUMN_EPSILON) {
@@ -281,53 +295,59 @@ export function generateTab(notes: NoteEventTime[], tuning: TuningId, capo = 0):
   let prevFrets: (number | null)[] | undefined;
 
   for (const g of groups) {
-    // Build candidates using all playable positions.
-    const cands: ChordCandidate[] = [];
-    // Allow duplicate MIDI in chords — try different strings for each occurrence.
-    const usedStringsByNote = new Map<number, Set<number>>();
-
-    for (let ni = 0; ni < g.notes.length; ni++) {
-      const n = g.notes[ni];
-      const positions = allPositions(n.midi, open, capo);
-      if (positions.length === 0) continue;
-      // For duplicate MIDI within same chord, exclude already-assigned strings from previous
-      // occurrences so each copy lands on a different string when possible.
-      let filteredPositions = positions;
-      const usedForMidi = usedStringsByNote.get(n.midi);
-      if (usedForMidi && usedForMidi.size < positions.length) {
-        const alt = positions.filter(p => !usedForMidi.has(p.s));
-        if (alt.length > 0) filteredPositions = alt;
-      }
-      cands.push({ until: n.until, positions: filteredPositions });
-    }
-    if (cands.length === 0) continue;
-
-    // For single notes: use exact same lowest-fret logic as the Fretboard.
-    let assign: Map<number, { s: number; fret: number }>;
-    if (cands.length === 1) {
-      assign = new Map();
-      const p = cands[0].positions[0]; // lowest fret, matches Fretboard.position()
-      assign.set(0, p);
-    } else {
-      assign = voiceChord(cands, prevFrets);
-    }
-    if (assign.size === 0) continue;
-
     const frets = new Array<number | null>(open.length).fill(null);
     const untilArr = new Array<number | null>(open.length).fill(null);
-    for (const [idx, p] of assign) {
-      frets[p.s] = p.fret;
-      untilArr[p.s] = cands[idx].until;
-      // Track used strings for duplicate MIDI handling.
-      const midi = g.notes[idx]?.midi;
-      if (midi != null) {
-        let set = usedStringsByNote.get(midi);
-        if (!set) { set = new Set(); usedStringsByNote.set(midi, set); }
-        set.add(p.s);
+
+    if (g.notes.length === 1) {
+      // Single note → use lowest-fret position, exactly like Fretboard.
+      const pos = lowestFretPosition(g.notes[0].midi, open, capo);
+      if (pos) {
+        frets[pos.s] = pos.fret;
+        untilArr[pos.s] = g.notes[0].until;
+      }
+    } else {
+      // Multiple notes → use lowest-fret first, resolve conflicts with voiceChord.
+      const assigned: { s: number; fret: number }[] = [];
+      const usedStrings = new Set<number>();
+      const remaining: ChordCandidate[] = [];
+
+      for (const n of g.notes) {
+        const pos = lowestFretPosition(n.midi, open, capo);
+        if (pos && !usedStrings.has(pos.s)) {
+          assigned.push(pos);
+          usedStrings.add(pos.s);
+          frets[pos.s] = pos.fret;
+          untilArr[pos.s] = n.until;
+        } else {
+          // Conflict — add to candidates for voiceChord fallback.
+          const positions = allPositions(n.midi, open, capo);
+          if (positions.length) {
+            remaining.push({ until: n.until, positions });
+          }
+        }
+      }
+
+      // Use voiceChord for any remaining notes that couldn't get their preferred position.
+      if (remaining.length > 0) {
+        const assign = voiceChord(remaining, prevFrets);
+        for (const [, p] of assign) {
+          if (frets[p.s] == null) {
+            frets[p.s] = p.fret;
+            // Find the until from remaining candidates.
+            const candIdx = [...assign.entries()].find(([_k, v]) => v === p)?.[0];
+            if (candIdx != null && candIdx < remaining.length) {
+              untilArr[p.s] = remaining[candIdx].until;
+            }
+          }
+        }
       }
     }
-    columns.push({ frets, until: untilArr, time: g.time });
-    prevFrets = frets;
+
+    // Only add column if at least one string has a note.
+    if (frets.some(f => f != null)) {
+      columns.push({ frets, until: untilArr, time: g.time });
+      prevFrets = frets;
+    }
   }
 
   // Post-process: enforce minimum spacing (= eighth note) so notes never overlap
