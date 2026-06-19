@@ -8,6 +8,34 @@ import { gmName, type Instrument, type InstrumentId, type InstrumentSource } fro
 
 const instrumentCache = new Map<InstrumentId, Promise<Instrument>>();
 
+/** Create a subtle vibrato chain for violin — LFO modulates amplitude to
+ *  simulate bow pressure variation (tremolo), adding expressiveness. */
+function createViolinChain(ac: AudioContext, masterDest: AudioNode): { dest: AudioNode; cleanup: () => void } {
+  const tremoloGain = ac.createGain();
+  tremoloGain.gain.value = 1.0;
+
+  const lfo = ac.createOscillator();
+  lfo.type = 'sine';
+  lfo.frequency.value = 5.2;
+
+  const lfoDepth = ac.createGain();
+  lfoDepth.gain.value = 0.12;
+
+  lfo.connect(lfoDepth);
+  lfoDepth.connect(tremoloGain.gain);
+  lfo.start();
+
+  tremoloGain.connect(masterDest);
+
+  return {
+    dest: tremoloGain,
+    cleanup: () => {
+      try { lfo.stop(); } catch { /* ok */ }
+      try { lfo.disconnect(); lfoDepth.disconnect(); tremoloGain.disconnect(); } catch { /* ok */ }
+    },
+  };
+}
+
 function wrapSoundfont(sf: SoundfontInstrument, source: InstrumentSource): Instrument {
   return {
     source,
@@ -71,7 +99,11 @@ async function loadSoundfontInstrument(ac: AudioContext, id: InstrumentId): Prom
   const base = import.meta.env.BASE_URL ?? '/';
   const gm = gmName(id);
   const localUrl = `${base}soundfonts/${gm}-mp3.js`;
-  const dest = getMaster();
+  // Violin gets a dedicated tremolo chain; other instruments connect straight to master.
+  const isViolin = id === 'violin';
+  const masterDest = getMaster();
+  const violinChain = isViolin ? createViolinChain(ac, masterDest) : null;
+  const dest = violinChain ? violinChain.dest : masterDest;
   // 1. Local bundled soundfont (no network).
   try {
     const sf = await withTimeout(

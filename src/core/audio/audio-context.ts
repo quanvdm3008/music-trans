@@ -7,6 +7,8 @@ const MASTER_GAIN = 1.8;
 let audioCtx: AudioContext | null = null;
 let masterGain: GainNode | null = null;
 let masterCompressor: DynamicsCompressorNode | null = null;
+let reverbSend: GainNode | null = null;
+let reverbDry: GainNode | null = null;
 
 export function getCtx(): AudioContext {
   if (!audioCtx) {
@@ -18,11 +20,57 @@ export function getCtx(): AudioContext {
   return audioCtx;
 }
 
-/** A shared master chain: gain → compressor → speakers. */
+/** A shared master chain: gain → parallel (dry + reverb) → compressor → speakers. */
 export function getMaster(): AudioNode {
   const ac = getCtx();
   if (!masterGain) {
-    // Compressor soft-limits peaks, prevents clipping on dense chords.
+    // Reverb: 3 parallel feedback delays simulating early reflections.
+    const createReverbLine = (delaySec: number, fb: number, cutoff: number) => {
+      const delay_ = ac.createDelay(Math.max(0.1, delaySec + 0.05));
+      delay_.delayTime.value = delaySec;
+      const fbGain = ac.createGain();
+      fbGain.gain.value = fb;
+      const lp = ac.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = cutoff;
+      delay_.connect(lp);
+      lp.connect(fbGain);
+      fbGain.connect(delay_);
+      return delay_;
+    };
+
+    const rev1 = createReverbLine(0.031, 0.52, 4000);
+    const rev2 = createReverbLine(0.047, 0.45, 3500);
+    const rev3 = createReverbLine(0.073, 0.38, 2800);
+
+    const revMerge = ac.createGain();
+    revMerge.gain.value = 0.33;
+    rev1.connect(revMerge);
+    rev2.connect(revMerge);
+    rev3.connect(revMerge);
+
+    // Dry/wet mix: dry passes through, wet is the reverb send.
+    reverbDry = ac.createGain();
+    reverbDry.gain.value = 0.78; // mostly dry
+
+    reverbSend = ac.createGain();
+    reverbSend.gain.value = 0.22; // subtle wet
+
+    masterGain = ac.createGain();
+    masterGain.gain.value = MASTER_GAIN;
+
+    // Input → gain → (dry + reverb) → merge → compressor → out
+    masterGain.connect(reverbDry);
+    masterGain.connect(reverbSend);
+    reverbSend.connect(rev1);
+    reverbSend.connect(rev2);
+    reverbSend.connect(rev3);
+
+    const merge = ac.createGain();
+    merge.gain.value = 1.0;
+    reverbDry.connect(merge);
+    revMerge.connect(merge);
+
     masterCompressor = ac.createDynamicsCompressor();
     masterCompressor.threshold.value = -6;
     masterCompressor.knee.value = 12;
@@ -30,10 +78,7 @@ export function getMaster(): AudioNode {
     masterCompressor.attack.value = 0.005;
     masterCompressor.release.value = 0.15;
 
-    masterGain = ac.createGain();
-    masterGain.gain.value = MASTER_GAIN;
-
-    masterGain.connect(masterCompressor);
+    merge.connect(masterCompressor);
     masterCompressor.connect(ac.destination);
   }
   return masterGain;
