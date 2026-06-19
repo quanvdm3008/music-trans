@@ -11,6 +11,8 @@ import type { TuningId } from './tablature.store';
 const FRET_COUNT = 18;
 /** Fretted notes within one chord must fit inside this many frets (one hand's reach). */
 const FRET_WINDOW = 4;
+/** Max fret delta between consecutive chords — bigger = hand jumps too far. */
+const MAX_FRET_JUMP = 5;
 const COLUMN_EPSILON = 0.06;
 const MIN_HOLD_SECONDS = 0.08;
 /** Minimum spacing between columns in seconds (= eighth note at 120 BPM) */
@@ -198,31 +200,50 @@ function voiceChord(
     }
   }
 
-  let best = { count: -1, span: Infinity, assign: new Map<number, { s: number; fret: number }>() };
+  let best = { count: -1, span: Infinity, avgFret: 0, assign: new Map<number, { s: number; fret: number }>() };
   for (const lo of sortedAnchors) {
     const assign = matchWindow(cands, lo);
     const frets = [...assign.values()].map((p) => p.fret).filter((f) => f > 0);
     const span = frets.length ? Math.max(...frets) - Math.min(...frets) : 0;
     const count = assign.size;
+    const curAvg = frets.length ? frets.reduce((s, f) => s + f, 0) / frets.length : 0;
 
-    // Prefer: more notes > tighter span > closer to previous position.
-    let better = false;
-    if (count > best.count) better = true;
-    else if (count === best.count && span < best.span) better = true;
-    else if (count === best.count && span === best.span && previousFrets) {
-      // Tie-break: prefer positions closer to previous hand position.
+    // Penalize large jumps from previous hand position.
+    let jumpPenalty = 0;
+    if (previousFrets) {
       const prevFretted = previousFrets.filter((f): f is number => f !== null && f > 0);
-      if (prevFretted.length > 0) {
+      if (prevFretted.length > 0 && frets.length > 0) {
         const prevAvg = prevFretted.reduce((s, f) => s + f, 0) / prevFretted.length;
-        const curAvg = frets.length ? frets.reduce((s, f) => s + f, 0) / frets.length : 0;
-        const bestFrets = [...best.assign.values()].map((p) => p.fret).filter((f) => f > 0);
-        const bestAvg = bestFrets.length ? bestFrets.reduce((s, f) => s + f, 0) / bestFrets.length : 0;
-        if (Math.abs(curAvg - prevAvg) < Math.abs(bestAvg - prevAvg)) better = true;
+        const delta = Math.abs(curAvg - prevAvg);
+        if (delta > MAX_FRET_JUMP) jumpPenalty = delta * 0.5; // heavily penalize big jumps
       }
     }
 
+    // Prefer: more notes > tighter span > closer to previous position > less jump.
+    let better = false;
+    if (count > best.count) better = true;
+    else if (count === best.count) {
+      const bestFrets = [...best.assign.values()].map((p) => p.fret).filter((f) => f > 0);
+      const bestAvg = bestFrets.length ? bestFrets.reduce((s, f) => s + f, 0) / bestFrets.length : 0;
+
+      // Effective span = actual span + jump penalty.
+      const curScore = span + jumpPenalty;
+      let bestJumpPenalty = 0;
+      if (previousFrets) {
+        const prevFretted = previousFrets.filter((f): f is number => f !== null && f > 0);
+        if (prevFretted.length > 0 && bestFrets.length > 0) {
+          const prevAvg = prevFretted.reduce((s, f) => s + f, 0) / prevFretted.length;
+          const delta = Math.abs(bestAvg - prevAvg);
+          if (delta > MAX_FRET_JUMP) bestJumpPenalty = delta * 0.5;
+        }
+      }
+      const bestScore = best.span + bestJumpPenalty;
+
+      if (curScore < bestScore) better = true;
+    }
+
     if (better) {
-      best = { count, span, assign };
+      best = { count, span, avgFret: curAvg, assign };
     }
   }
   return best.assign;

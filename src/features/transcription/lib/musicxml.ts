@@ -112,20 +112,25 @@ function appendStaffMeasure(
   const elements = staff.measures[measureIndex] ?? [];
   if (elements.length === 0) return;
 
-  // Pre-compute beam groups for consecutive beamed notes of the same type.
-  // A beam group is a run of 2+ notes with the same beam level.
+  // Pre-compute beam groups for consecutive beamed notes.
+  // Groups can mix different beamed types (eighth + 16th) — the shortest
+  // note determines the beam count for the whole group.
   const beamInfo: (BeamRole | null)[] = new Array(elements.length).fill(null);
+  const beamGroupLevels: number[] = new Array(elements.length).fill(0);
   for (let i = 0; i < elements.length; ) {
     const el = elements[i];
-    const levels = el.isRest ? 0 : (BEAM_LEVELS[el.type] ?? 0);
-    if (levels === 0) { i++; continue; }
+    const elLevels = el.isRest ? 0 : (BEAM_LEVELS[el.type] ?? 0);
+    if (elLevels === 0) { i++; continue; }
 
-    // Find consecutive notes with the same beam levels.
+    // Find consecutive beamed notes (any type that needs beams).
     let j = i + 1;
+    let maxLevels = elLevels;
     while (j < elements.length) {
       const next = elements[j];
       if (next.isRest) break;
-      if ((BEAM_LEVELS[next.type] ?? 0) !== levels) break;
+      const nextLevels = BEAM_LEVELS[next.type] ?? 0;
+      if (nextLevels === 0) break;
+      maxLevels = Math.max(maxLevels, nextLevels);
       j++;
     }
     const count = j - i;
@@ -134,6 +139,7 @@ function appendStaffMeasure(
         if (k === 0) beamInfo[i + k] = 'begin';
         else if (k === count - 1) beamInfo[i + k] = 'end';
         else beamInfo[i + k] = 'continue';
+        beamGroupLevels[i + k] = maxLevels;
       }
     }
     i = j;
@@ -142,7 +148,7 @@ function appendStaffMeasure(
   for (let idx = 0; idx < elements.length; idx++) {
     const el = elements[idx];
     const role = beamInfo[idx];
-    const beams = role != null ? BEAM_LEVELS[el.type] ?? 0 : 0;
+    const beams = role != null ? beamGroupLevels[idx] : 0;
     lines.push(...noteElementXml(el, voice, staffNumber, useFlats, beams, role));
   }
 }
