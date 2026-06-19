@@ -47,9 +47,6 @@ const BASE_OPTIONS = {
   pageMarginRight: 100,
   spacingSystem: 12,
   breaks: 'auto',
-  beamMode: 'auto',
-  beamMaxSlopes: '0',
-  beamMixedPreserve: 'true',
 };
 
 /** Render MusicXML into an array of SVG strings, one per page. */

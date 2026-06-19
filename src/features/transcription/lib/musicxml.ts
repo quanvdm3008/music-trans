@@ -82,6 +82,25 @@ function clefXml(clef: 'treble' | 'bass', staffNumber: number | null): string {
   return `        <clef${num}><sign>G</sign><line>2</line></clef>`;
 }
 
+// Beam-able note types and how many beam levels each needs.
+const BEAM_LEVELS: Record<string, number> = {
+  eighth: 1,
+  '16th': 2,
+  '32nd': 3,
+  '64th': 4,
+};
+
+/** Which MusicXML beam element to emit for a note's position in a group. */
+type BeamRole = 'begin' | 'continue' | 'end';
+
+function beamElements(beamCount: number, role: BeamRole): string[] {
+  const out: string[] = [];
+  for (let n = 1; n <= beamCount; n++) {
+    out.push(`        <beam number="${n}">${role}</beam>`);
+  }
+  return out;
+}
+
 function appendStaffMeasure(
   lines: string[],
   staff: StaffNotation,
@@ -91,8 +110,40 @@ function appendStaffMeasure(
   useFlats: boolean,
 ): void {
   const elements = staff.measures[measureIndex] ?? [];
-  for (const el of elements) {
-    lines.push(...noteElementXml(el, voice, staffNumber, useFlats));
+  if (elements.length === 0) return;
+
+  // Pre-compute beam groups for consecutive beamed notes of the same type.
+  // A beam group is a run of 2+ notes with the same beam level.
+  const beamInfo: (BeamRole | null)[] = new Array(elements.length).fill(null);
+  for (let i = 0; i < elements.length; ) {
+    const el = elements[i];
+    const levels = el.isRest ? 0 : (BEAM_LEVELS[el.type] ?? 0);
+    if (levels === 0) { i++; continue; }
+
+    // Find consecutive notes with the same beam levels.
+    let j = i + 1;
+    while (j < elements.length) {
+      const next = elements[j];
+      if (next.isRest) break;
+      if ((BEAM_LEVELS[next.type] ?? 0) !== levels) break;
+      j++;
+    }
+    const count = j - i;
+    if (count >= 2) {
+      for (let k = 0; k < count; k++) {
+        if (k === 0) beamInfo[i + k] = 'begin';
+        else if (k === count - 1) beamInfo[i + k] = 'end';
+        else beamInfo[i + k] = 'continue';
+      }
+    }
+    i = j;
+  }
+
+  for (let idx = 0; idx < elements.length; idx++) {
+    const el = elements[idx];
+    const role = beamInfo[idx];
+    const beams = role != null ? BEAM_LEVELS[el.type] ?? 0 : 0;
+    lines.push(...noteElementXml(el, voice, staffNumber, useFlats, beams, role));
   }
 }
 
@@ -101,9 +152,12 @@ function noteElementXml(
   voice: number,
   staffNumber: number | null,
   useFlats: boolean,
+  beamCount = 0,
+  beamRole: BeamRole | null = null,
 ): string[] {
   const out: string[] = [];
   const dots = '<dot/>'.repeat(el.dots);
+  const beams = beamCount > 0 && beamRole ? beamElements(beamCount, beamRole) : [];
 
   if (el.isRest) {
     const staffTag = staffNumber != null ? `<staff>${staffNumber}</staff>` : '';
@@ -135,6 +189,8 @@ function noteElementXml(
     out.push(`        <type>${el.type}</type>`);
     if (dots) out.push(`        ${dots}`);
     if (staffNumber != null) out.push(`        <staff>${staffNumber}</staff>`);
+    // Beam elements (only on the first note of a chord).
+    if (idx === 0 && beams.length > 0) out.push(...beams);
     if (el.tieStop || el.tieStart) {
       out.push('        <notations>');
       if (el.tieStop) out.push('          <tied type="stop"/>');

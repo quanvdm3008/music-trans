@@ -40,14 +40,23 @@ export interface TabData {
   columns: TabColumn[];
 }
 
-/** Lowest-fret position for a pitch given open strings + capo, or null. */
-function position(midi: number, open: number[], capo: number): { s: number; fret: number } | null {
-  let best: { s: number; fret: number } | null = null;
+/** All playable positions for a pitch, sorted by preference: open strings first, then lowest fret. */
+function allPositions(midi: number, open: number[], capo: number): { s: number; fret: number }[] {
+  const result: { s: number; fret: number }[] = [];
   for (let s = 0; s < open.length; s++) {
     const fret = midi - (open[s] + capo);
-    if (fret >= 0 && fret <= FRET_COUNT && (!best || fret < best.fret)) best = { s, fret };
+    if (fret >= 0 && fret <= FRET_COUNT) {
+      result.push({ s, fret });
+    }
   }
-  return best;
+  // Sort: open strings (fret 0) first, then lowest fret, then highest string (for melody).
+  result.sort((a, b) => {
+    if (a.fret === 0 && b.fret !== 0) return -1;
+    if (b.fret === 0 && a.fret !== 0) return 1;
+    if (a.fret !== b.fret) return a.fret - b.fret;
+    return a.s - b.s; // higher string preferred for melody
+  });
+  return result;
 }
 
 /**
@@ -69,8 +78,9 @@ export function filterTabNotes(
   const afterStringFilter: NoteEventTime[] = [];
   const lastKeptByString = new Map<number, number>();
   for (const note of sorted) {
-    const pos = position(Math.round(note.pitchMidi), open, capo);
-    if (!pos) continue;
+    const positions = allPositions(Math.round(note.pitchMidi), open, capo);
+    if (positions.length === 0) continue;
+    const pos = positions[0]; // Use best position for timing check
     const lastTime = lastKeptByString.get(pos.s) ?? -Infinity;
     if (note.startTimeSeconds - lastTime < SIXTEENTH_NOTE_MIN_GAP) continue;
     afterStringFilter.push(note);
@@ -98,13 +108,13 @@ export function filterTabNotes(
       // New time window — flush the previous one.
       flushWindow();
       windowStart = note.startTimeSeconds;
-      const pos = position(Math.round(note.pitchMidi), open, capo);
-      bestInWindow = pos ? { note, fret: pos.fret } : null;
+      const positions = allPositions(Math.round(note.pitchMidi), open, capo);
+      bestInWindow = positions.length > 0 ? { note, fret: positions[0].fret } : null;
     } else {
       // Same window — compete: keep the note with the lower fret.
-      const pos = position(Math.round(note.pitchMidi), open, capo);
-      if (pos && (!bestInWindow || pos.fret < bestInWindow.fret)) {
-        bestInWindow = { note, fret: pos.fret };
+      const positions = allPositions(Math.round(note.pitchMidi), open, capo);
+      if (positions.length > 0 && (!bestInWindow || positions[0].fret < bestInWindow.fret)) {
+        bestInWindow = { note, fret: positions[0].fret };
       }
     }
   }
@@ -161,21 +171,58 @@ function matchWindow(
  * Pick a playable voicing for one chord: one note per string, fretted notes
  * within a 4-fret hand reach, dropping notes that can't fit. Tries each fret as
  * the window's low anchor and keeps the assignment that plays the most notes in
- * the lowest, tightest position.
+ * the lowest, tightest position. If previousFrets is provided, prefers anchors
+ * near the previous hand position for smoother transitions.
  */
-function voiceChord(cands: ChordCandidate[]): Map<number, { s: number; fret: number }> {
+function voiceChord(
+  cands: ChordCandidate[],
+  previousFrets?: (number | null)[],
+): Map<number, { s: number; fret: number }> {
   // Candidate window anchors: every fret that appears, plus the nut (0).
   const anchors = new Set<number>([0]);
   for (const c of cands) for (const p of c.positions) anchors.add(p.fret);
 
+  // If we know the previous hand position, bias anchors near it.
+  let sortedAnchors = [...anchors].sort((a, b) => a - b);
+  if (previousFrets) {
+    const prevFretted = previousFrets.filter((f): f is number => f !== null && f > 0);
+    if (prevFretted.length > 0) {
+      const prevAvg = prevFretted.reduce((s, f) => s + f, 0) / prevFretted.length;
+      // Sort anchors by distance to previous average position, then by fret.
+      sortedAnchors.sort((a, b) => {
+        const distA = Math.abs(a - prevAvg);
+        const distB = Math.abs(b - prevAvg);
+        if (distA !== distB) return distA - distB;
+        return a - b;
+      });
+    }
+  }
+
   let best = { count: -1, span: Infinity, assign: new Map<number, { s: number; fret: number }>() };
-  for (const lo of [...anchors].sort((a, b) => a - b)) {
+  for (const lo of sortedAnchors) {
     const assign = matchWindow(cands, lo);
     const frets = [...assign.values()].map((p) => p.fret).filter((f) => f > 0);
     const span = frets.length ? Math.max(...frets) - Math.min(...frets) : 0;
-    // Strict comparisons → earlier (lower) anchors win ties: prefer low positions.
-    if (assign.size > best.count || (assign.size === best.count && span < best.span)) {
-      best = { count: assign.size, span, assign };
+    const count = assign.size;
+
+    // Prefer: more notes > tighter span > closer to previous position.
+    let better = false;
+    if (count > best.count) better = true;
+    else if (count === best.count && span < best.span) better = true;
+    else if (count === best.count && span === best.span && previousFrets) {
+      // Tie-break: prefer positions closer to previous hand position.
+      const prevFretted = previousFrets.filter((f): f is number => f !== null && f > 0);
+      if (prevFretted.length > 0) {
+        const prevAvg = prevFretted.reduce((s, f) => s + f, 0) / prevFretted.length;
+        const curAvg = frets.length ? frets.reduce((s, f) => s + f, 0) / frets.length : 0;
+        const bestFrets = [...best.assign.values()].map((p) => p.fret).filter((f) => f > 0);
+        const bestAvg = bestFrets.length ? bestFrets.reduce((s, f) => s + f, 0) / bestFrets.length : 0;
+        if (Math.abs(curAvg - prevAvg) < Math.abs(bestAvg - prevAvg)) better = true;
+      }
+    }
+
+    if (better) {
+      best = { count, span, assign };
     }
   }
   return best.assign;
@@ -200,23 +247,21 @@ export function generateTab(notes: NoteEventTime[], tuning: TuningId, capo = 0):
   }
 
   const columns: TabColumn[] = [];
+  let prevFrets: (number | null)[] | undefined;
+
   for (const g of groups) {
-    // Build candidates (dedupe identical pitches in the same chord).
+    // Build candidates using all playable positions (not just lowest fret).
     const cands: ChordCandidate[] = [];
     const seen = new Set<number>();
     for (const n of g.notes) {
       if (seen.has(n.midi)) continue;
       seen.add(n.midi);
-      const positions: { s: number; fret: number }[] = [];
-      for (let s = 0; s < open.length; s++) {
-        const fret = n.midi - (open[s] + capo);
-        if (fret >= 0 && fret <= FRET_COUNT) positions.push({ s, fret });
-      }
+      const positions = allPositions(n.midi, open, capo);
       if (positions.length) cands.push({ until: n.until, positions });
     }
     if (cands.length === 0) continue;
 
-    const assign = voiceChord(cands);
+    const assign = voiceChord(cands, prevFrets);
     if (assign.size === 0) continue;
 
     const frets = new Array<number | null>(open.length).fill(null);
@@ -226,6 +271,7 @@ export function generateTab(notes: NoteEventTime[], tuning: TuningId, capo = 0):
       untilArr[p.s] = cands[idx].until;
     }
     columns.push({ frets, until: untilArr, time: g.time });
+    prevFrets = frets;
   }
 
   // Post-process: enforce minimum spacing (= eighth note) so notes never overlap
