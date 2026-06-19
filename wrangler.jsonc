@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "music-converter",
+  "name": "music-trans",
   "compatibility_date": "2026-06-05",
   "main": "worker/index.ts",
   "observability": {
