@@ -80,13 +80,15 @@ export async function playNotes(
     total = Math.max(total, (n.startTimeSeconds + Math.max(0.08, n.durationSeconds)) / s);
   }
 
-  // Lookahead scheduler — adaptive setTimeout for tighter Web Audio timing.
+  // Lookahead scheduler — rAF for tight timing, setTimeout fallback for bg tabs.
   const t0 = ac.currentTime + 0.2;
-  const SCHEDULE_AHEAD = 1.2;
-  const TICK_MIN_MS = 10;
+  // Scale lookahead with speed so fast playback stays ahead of the audio clock.
+  const SCHEDULE_AHEAD = 0.8 + Math.min(2.0, s * 0.6);
   let i = 0;
-  let schedulerTimer: number | null = null;
+  let rafId: number | null = null;
+  let timerId: number | null = null;
   let stopped = false;
+  let bgMode = false;
 
   const scheduleDue = () => {
     if (stopped) return;
@@ -98,13 +100,22 @@ export async function playNotes(
       inst.play(Math.round(n.pitchMidi), t0 + Math.max(0, n.startTimeSeconds / s), dur, gain);
     }
     if (i >= effective.length) {
-      schedulerTimer = null;
+      rafId = null;
+      timerId = null;
       return;
     }
-    // Adaptive delay: schedule sooner if next note is close.
-    const nextDue = (effective[i].startTimeSeconds / s) - (ac.currentTime - t0);
-    const delay = Math.max(TICK_MIN_MS, Math.min(80, (nextDue - SCHEDULE_AHEAD * 0.5) * 1000));
-    schedulerTimer = window.setTimeout(scheduleDue, delay);
+    // Schedule next tick via rAF (precise ~16ms) or setTimeout (bg fallback).
+    if (!bgMode) {
+      rafId = requestAnimationFrame(scheduleDue);
+      // Fallback: if rAF doesn't fire within 100ms, switch to setTimeout mode.
+      timerId = window.setTimeout(() => {
+        bgMode = true;
+        if (rafId != null) { cancelAnimationFrame(rafId); rafId = null; }
+        scheduleDue();
+      }, 120);
+    } else {
+      timerId = window.setTimeout(scheduleDue, 12);
+    }
   };
   scheduleDue();
 
@@ -116,7 +127,8 @@ export async function playNotes(
     currentTime: () => offset + Math.max(0, (ac.currentTime - t0)),
     stop: () => {
       stopped = true;
-      if (schedulerTimer != null) window.clearTimeout(schedulerTimer);
+      if (rafId != null) cancelAnimationFrame(rafId);
+      if (timerId != null) window.clearTimeout(timerId);
       window.clearTimeout(endTimer);
       try {
         inst.stop();
